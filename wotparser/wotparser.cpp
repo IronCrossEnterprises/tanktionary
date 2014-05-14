@@ -165,12 +165,13 @@ bool Case(Element& element, const char* query = 0) {
 	return true;
 }
 
-vector<double> ParseNums(const char* p) {
-  vector<double> out;
-  if (!p) return out;
-  out.push_back(atof(p));
-  //strf
-  return out;
+double ParseNums(const char* p, int i) {
+	for (; i; --i) {
+		auto q = strstr(p, " ");
+		if (!q) return 0;
+		p = q + 1;
+	}
+	return atof(p);
 }
 
 //==============================================================================
@@ -638,7 +639,7 @@ struct Turret : Component {
 		Ignore("turretRotatorSoundManual") ||
 		Ignore("turretRotatorSoundGear") ||
 		Case(invisibilityFactor, "invisibilityFactor") ||
-		Case(yawLimits, "yawLimits") ||
+		//Case(yawLimits, "yawLimits") && (printf("<%s>", label.c_str()), 1) ||
 		ParseComponent();
 	}
 	ArmorSet armor;
@@ -648,12 +649,12 @@ struct Turret : Component {
 	double circularVisionRadius;
 	DeviceHealth surveyingDeviceHealth;
 	Guns guns;
-	string yawLimits;
+	//string yawLimits;
 	double invisibilityFactor;
 };
 
 struct Tanker {
-	enum Role { NONE, COMMANDER, GUNNER, RADIOMAN, DRIVER, LOADER } roles[4];
+	enum Role { NONE, COMMANDER = 1, GUNNER = 2, DRIVER = 4, RADIOMAN = 8, LOADER = 16 } roles[4];
 	void Set(Role primary, const string& extra) {
 		roles[0] = primary;
 		Role* next = roles + 1;
@@ -1064,7 +1065,7 @@ struct TankInstance {
     double rotationSpeed, reloadTime, ammo, aimTime;
     struct { double size, burst, delay; } magazine;
     struct { double base, movement, shot, damaged; } dispersion;
-    struct { struct { double up, down; } front, side, back; } pitchLimits;
+    struct { struct { double up, down; } basic, front, back; } pitchLimits;
   } gun;
   struct Shell : Component {
     enum Kind { SLOT_UNUSED, AP, APCR, HEAT, HE };
@@ -1108,9 +1109,9 @@ struct TankInstance {
     chassis.armor.right = c.armor.rightTrack;
     chassis.maxLoad = c.maxLoad;
     chassis.movementDispersion = c.shotDispersionFactors.vehicleMovement;
-    chassis.terrainResistance.hard = 0; // FIXME
-    chassis.terrainResistance.medium = 0; // FIXME
-    chassis.terrainResistance.soft = 0; // FIXME
+    chassis.terrainResistance.hard = ParseNums(c.terrainResistance.c_str(), 0);
+    chassis.terrainResistance.medium = ParseNums(c.terrainResistance.c_str(), 1);
+    chassis.terrainResistance.soft = ParseNums(c.terrainResistance.c_str(), 2);
     chassis.speedLimits.forward = h.speedLimits.forward;
     chassis.speedLimits.backward = h.speedLimits.backward;
     chassis.rotation.speed = c.rotationSpeed;
@@ -1138,8 +1139,8 @@ struct TankInstance {
     turret.armor.front = 0; // FIXME
     turret.armor.side = 0; // FIXME
     turret.armor.rear = 0; // FIXME
-    turret.yawLimits.left = 0; // FIXME take min of turret and gun yawLimits
-    turret.yawLimits.right = 0; // FIXME take min of turret and gun yawLimits
+    turret.yawLimits.left = ParseNums(g.turretYawLimits.c_str(), 0);
+    turret.yawLimits.right = ParseNums(g.turretYawLimits.c_str(), 1);
     engine.health = e.maxHealth;
     engine.regenHealth = e.maxRegenHealth;
     engine.repairCost = e.repairCost;
@@ -1181,12 +1182,12 @@ struct TankInstance {
     gun.dispersion.movement = g.shotDispersionFactors.turretRotation;
     gun.dispersion.shot = g.shotDispersionFactors.afterShot;
     gun.dispersion.damaged = g.shotDispersionFactors.whileGunDamaged;
-    gun.pitchLimits.front.up = 0; // FIXME read pitch limits and extra pitch limits
-    gun.pitchLimits.front.down = 0; // FIXME read pitch limits and extra pitch limits
-    gun.pitchLimits.side.up = 0; // FIXME read pitch limits and extra pitch limits
-    gun.pitchLimits.side.down = 0; // FIXME read pitch limits and extra pitch limits
-    gun.pitchLimits.back.up = 0; // FIXME read pitch limits and extra pitch limits
-    gun.pitchLimits.back.down = 0; // FIXME read pitch limits and extra pitch limits
+    gun.pitchLimits.basic.up = -ParseNums(g.pitchLimits.c_str(), 0);
+    gun.pitchLimits.basic.down = ParseNums(g.pitchLimits.c_str(), 1);
+    gun.pitchLimits.front.up = g.extraPitchLimits.front.size() ? -ParseNums(g.extraPitchLimits.front.c_str(), 0) : gun.pitchLimits.basic.up;
+    gun.pitchLimits.front.down = g.extraPitchLimits.front.size() ? ParseNums(g.extraPitchLimits.front.c_str(), 1) : gun.pitchLimits.basic.down;
+    gun.pitchLimits.back.up = g.extraPitchLimits.back.size() ? -ParseNums(g.extraPitchLimits.back.c_str(), 0) : gun.pitchLimits.basic.up;
+    gun.pitchLimits.back.down = g.extraPitchLimits.back.size() ? ParseNums(g.extraPitchLimits.back.c_str(), 1) : gun.pitchLimits.basic.down;
     ammoBay.health = h.hull.ammoBayHealth.maxHealth;
     ammoBay.regenHealth = h.hull.ammoBayHealth.maxRegenHealth;
     ammoBay.repairCost = h.hull.ammoBayHealth.repairCost;
@@ -1208,14 +1209,11 @@ struct TankInstance {
         h.turrets.list.begin()->guns.list.begin()->weight +
         h.engines.list.begin()->weight +
         h.radios.list.begin()->weight);
-    crew[0] = 0; // FIXME
-    crew[1] = 0; // FIXME
-    crew[2] = 0; // FIXME
-    crew[3] = 0; // FIXME
-    crew[4] = 0; // FIXME
-    crew[5] = 0; // FIXME
-    crew[6] = 0; // FIXME
-    crew[7] = 0; // FIXME
+    for (size_t tanker = 0; tanker < 8; tanker++) {
+      crew[tanker] = 0;
+      for (size_t role = 0; role < 4; role++)
+        crew[tanker] |= h.crew.tankers[tanker].roles[role];
+    }
     isPremium = h.premium;
     nation = h.nation;
   }
