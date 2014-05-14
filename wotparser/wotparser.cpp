@@ -165,6 +165,14 @@ bool Case(Element& element, const char* query = 0) {
 	return true;
 }
 
+vector<double> ParseNums(const char* p) {
+  vector<double> out;
+  if (!p) return out;
+  out.push_back(atof(p));
+  //strf
+  return out;
+}
+
 //==============================================================================
 // Shells
 //==============================================================================
@@ -286,7 +294,7 @@ struct Unlocks : Element {
 };
 
 struct Component : Element {
-	Component() : notInShop(false) {}
+	Component() : notInShop(false), weight(0) {}
 
 	bool ParseComponent() {
 		return
@@ -1071,6 +1079,7 @@ struct TankInstance {
   Nation nation;
 
   TankInstance(const Tank& h, const ::Turret& t, const ::Gun& g) {
+    const ::FuelTank& f = h.fuelTanks.list.back();
     const ::Chassis& c = h.chassiss.list.back();
     const ::Engine& e = h.engines.list.back();
     const ::Radio& r = h.radios.list.back();
@@ -1182,16 +1191,23 @@ struct TankInstance {
     ammoBay.regenHealth = h.hull.ammoBayHealth.maxRegenHealth;
     ammoBay.repairCost = h.hull.ammoBayHealth.repairCost;
     ammoBay.chanceToHit = h.hull.ammoBayHealth.chanceToHit;
-    //fuelTank.health = h.fuelTank.maxHealth;
-    //fuelTank.regenHealth = h.fuelTank.maxRegenHealth;
-    //fuelTank.repairCost = h.fuelTank.repairCost;
-    //fuelTank.chanceToHit = .45;
-    //fuelTank.name = h.fuelTank.label;
-    //fuelTank.tags = h.fuelTank.tags;
-    //fuelTank.tier = h.fuelTank.level;
-    //fuelTank.price = h.fuelTank.price;
-    //fuelTank.weight = h.fuelTank.weight;
-    stockPowerToWeight = 0; // FIXME
+    fuelTank.health = f.maxHealth;
+    fuelTank.regenHealth = f.maxRegenHealth;
+    fuelTank.repairCost = f.repairCost;
+    fuelTank.chanceToHit = .45;
+    fuelTank.name = f.label;
+    fuelTank.tags = f.tags;
+    fuelTank.tier = f.maxHealth * 2 / 25 - 6;
+    fuelTank.price = f.price;
+    fuelTank.weight = f.weight;
+    stockPowerToWeight = (double)h.engines.list.begin()->power / (
+        h.hull.weight +
+        h.chassiss.list.begin()->weight +
+        h.fuelTanks.list.begin()->weight +
+        h.turrets.list.begin()->weight +
+        h.turrets.list.begin()->guns.list.begin()->weight +
+        h.engines.list.begin()->weight +
+        h.radios.list.begin()->weight);
     crew[0] = 0; // FIXME
     crew[1] = 0; // FIXME
     crew[2] = 0; // FIXME
