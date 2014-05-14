@@ -476,14 +476,12 @@ struct Gun : Component {
 			Case(front, "front") ||
 			Case(back, "back") ||
 			Case(transition, "transition") ||
-			Case(extraPitchLimits, "extraPitchLimits") ||
 			Fail();
 		}
 
 		string front;
 		string back;
 		double transition;
-		string extraPitchLimits;
 	};
 
 	void ParseSelf() override {
@@ -1022,6 +1020,195 @@ void ReadNation(const string& path) {
 		}
 }
 
+
+
+
+
+
+
+
+
+
+struct TankInstance {
+  enum Skills { COMMANDER = 1, GUNNER = 2, DRIVER = 4, RADIO_OPERATOR = 8, LOADER = 16 };
+  struct Device { double health, regenHealth, repairCost, chanceToHit; };
+  struct Component : Device {
+    string name, tags;
+    double tier, price, weight;
+  };
+  struct Hull : Component { struct { double front, side, back; } armor; } hull;
+  struct Chassis : Component {
+    struct { double left, right; } armor;
+    double maxLoad, movementDispersion;
+    struct { double hard, medium, soft; } terrainResistance;
+    struct { double forward, backward; } speedLimits;
+    struct { double speed, dispersion; bool isCentered; } rotation;
+  } chassis;
+  struct Turret : Component {
+    double rotationSpeed, visionRadius;
+    Device rotator, optics;
+    struct { double front, side, rear; } armor;
+    struct { double left, right; } yawLimits;
+  } turret;
+  struct Engine : Component { double power, chanceOfFire; } engine;
+  struct Radio : Component { double signalRadius; } radio;
+  struct Gun : Component {
+    double rotationSpeed, reloadTime, ammo, aimTime;
+    struct { double size, burst, delay; } magazine;
+    struct { double base, movement, shot, damaged; } dispersion;
+    struct { struct { double up, down; } front, side, back; } pitchLimits;
+  } gun;
+  struct Shell : Component {
+    enum Kind { SLOT_UNUSED, AP, APCR, HEAT, HE };
+    bool isPremium;
+    double caliber, explosionRadius, damage, moduleDamage, speed, gravity, maxRange, penAt100m, penAt720m;
+  } shells[3];
+  double stockPowerToWeight;
+  Device ammoBay;
+  Component fuelTank;
+  char crew[8];
+  bool isPremium;
+  Nation nation;
+
+  TankInstance(const Tank& h, const ::Turret& t, const ::Gun& g) {
+    const ::Chassis& c = h.chassiss.list.back();
+    const ::Engine& e = h.engines.list.back();
+    const ::Radio& r = h.radios.list.back();
+    hull.health = h.hull.maxHealth;
+    hull.regenHealth = 0;
+    hull.repairCost = h.repairCost;
+    hull.chanceToHit = 1;
+    hull.name = h.label;
+    hull.tags = h.tags;
+    hull.tier = h.level;
+    hull.price = h.price;
+    hull.weight = h.hull.weight;
+    hull.armor.front = 0; // FIXME
+    hull.armor.side = 0; // FIXME
+    hull.armor.back = 0; // FIXME
+    chassis.health = c.maxHealth;
+    chassis.regenHealth = c.maxRegenHealth;
+    chassis.repairCost = c.repairCost;
+    chassis.chanceToHit = 1;
+    chassis.name = c.label;
+    chassis.tags = c.tags;
+    chassis.tier = c.level;
+    chassis.price = c.price;
+    chassis.weight = c.weight;
+    chassis.armor.left = c.armor.leftTrack;
+    chassis.armor.right = c.armor.rightTrack;
+    chassis.maxLoad = c.maxLoad;
+    chassis.movementDispersion = c.shotDispersionFactors.vehicleMovement;
+    chassis.terrainResistance.hard = 0; // FIXME
+    chassis.terrainResistance.medium = 0; // FIXME
+    chassis.terrainResistance.soft = 0; // FIXME
+    chassis.speedLimits.forward = h.speedLimits.forward;
+    chassis.speedLimits.backward = h.speedLimits.backward;
+    chassis.rotation.speed = c.rotationSpeed;
+    chassis.rotation.dispersion = c.shotDispersionFactors.vehicleRotation;
+    chassis.rotation.isCentered = c.rotationIsAroundCenter;
+    turret.health = t.maxHealth;
+    turret.regenHealth = 0;
+    turret.repairCost = t.repairCost;
+    turret.chanceToHit = 1;
+    turret.name = t.label;
+    turret.tags = t.tags;
+    turret.tier = t.level;
+    turret.price = t.price;
+    turret.weight = t.weight;
+    turret.rotationSpeed = t.rotationSpeed;
+    turret.visionRadius = t.circularVisionRadius;
+    turret.rotator.health = t.turretRotatorHealth.maxHealth;
+    turret.rotator.regenHealth = t.turretRotatorHealth.maxRegenHealth;
+    turret.rotator.repairCost = t.turretRotatorHealth.repairCost;
+    turret.rotator.chanceToHit = t.turretRotatorHealth.chanceToHit;
+    turret.optics.health = t.surveyingDeviceHealth.maxHealth;
+    turret.optics.regenHealth = t.surveyingDeviceHealth.maxRegenHealth;
+    turret.optics.repairCost = t.surveyingDeviceHealth.repairCost;
+    turret.optics.chanceToHit = t.surveyingDeviceHealth.chanceToHit;
+    turret.armor.front = 0; // FIXME
+    turret.armor.side = 0; // FIXME
+    turret.armor.rear = 0; // FIXME
+    turret.yawLimits.left = 0; // FIXME take min of turret and gun yawLimits
+    turret.yawLimits.right = 0; // FIXME take min of turret and gun yawLimits
+    engine.health = e.maxHealth;
+    engine.regenHealth = e.maxRegenHealth;
+    engine.repairCost = e.repairCost;
+    engine.chanceToHit = .45;
+    engine.name = e.label;
+    engine.tags = e.tags;
+    engine.tier = e.level;
+    engine.price = e.price;
+    engine.weight = e.weight;
+    engine.power = e.power;
+    engine.chanceOfFire = e.fireStartingChance;
+    radio.health = r.maxHealth;
+    radio.regenHealth = r.maxRegenHealth;
+    radio.repairCost = r.repairCost;
+    radio.chanceToHit = .45;
+    radio.name = r.label;
+    radio.tags = r.tags;
+    radio.tier = r.level;
+    radio.price = r.price;
+    radio.weight = r.weight;
+    radio.signalRadius = r.distance;
+    gun.health = g.maxHealth;
+    gun.regenHealth = g.maxRegenHealth;
+    gun.repairCost = g.repairCost;
+    gun.chanceToHit = .33;
+    gun.name = g.label;
+    gun.tags = g.tags;
+    gun.tier = g.level;
+    gun.price = g.price;
+    gun.weight = g.weight;
+    gun.rotationSpeed = g.rotationSpeed;
+    gun.reloadTime = g.reloadTime;
+    gun.ammo = g.maxAmmo;
+    gun.aimTime = g.aimingTime;
+    gun.magazine.size = g.clip.count;
+    gun.magazine.burst = g.burst.count;
+    gun.magazine.delay = 60.0 / g.burst.rate;
+    gun.dispersion.base = g.shotDispersionRadius;
+    gun.dispersion.movement = g.shotDispersionFactors.turretRotation;
+    gun.dispersion.shot = g.shotDispersionFactors.afterShot;
+    gun.dispersion.damaged = g.shotDispersionFactors.whileGunDamaged;
+    gun.pitchLimits.front.up = 0; // FIXME read pitch limits and extra pitch limits
+    gun.pitchLimits.front.down = 0; // FIXME read pitch limits and extra pitch limits
+    gun.pitchLimits.side.up = 0; // FIXME read pitch limits and extra pitch limits
+    gun.pitchLimits.side.down = 0; // FIXME read pitch limits and extra pitch limits
+    gun.pitchLimits.back.up = 0; // FIXME read pitch limits and extra pitch limits
+    gun.pitchLimits.back.down = 0; // FIXME read pitch limits and extra pitch limits
+    ammoBay.health = h.hull.ammoBayHealth.maxHealth;
+    ammoBay.regenHealth = h.hull.ammoBayHealth.maxRegenHealth;
+    ammoBay.repairCost = h.hull.ammoBayHealth.repairCost;
+    ammoBay.chanceToHit = h.hull.ammoBayHealth.chanceToHit;
+    //fuelTank.health = h.fuelTank.maxHealth;
+    //fuelTank.regenHealth = h.fuelTank.maxRegenHealth;
+    //fuelTank.repairCost = h.fuelTank.repairCost;
+    //fuelTank.chanceToHit = .45;
+    //fuelTank.name = h.fuelTank.label;
+    //fuelTank.tags = h.fuelTank.tags;
+    //fuelTank.tier = h.fuelTank.level;
+    //fuelTank.price = h.fuelTank.price;
+    //fuelTank.weight = h.fuelTank.weight;
+    stockPowerToWeight = 0; // FIXME
+    crew[0] = 0; // FIXME
+    crew[1] = 0; // FIXME
+    crew[2] = 0; // FIXME
+    crew[3] = 0; // FIXME
+    crew[4] = 0; // FIXME
+    crew[5] = 0; // FIXME
+    crew[6] = 0; // FIXME
+    crew[7] = 0; // FIXME
+    isPremium = h.premium;
+    nation = h.nation;
+  }
+};
+
+
+
+
+
 struct MeasuredShell : Shell {
 	enum Kind { HE, AP, APCR, HEAT } kind_enum;
 	MeasuredShell(
@@ -1197,8 +1384,14 @@ double shotsTier(const vector<Shell>& shots) {
 	return pow(total * (1.0 / pow(size, 0.25)), 1.0/2.0);
 }
 
-//#define GROVER
-using namespace std;
+
+
+
+
+
+
+
+
 
 int main(int argc, char* argv[]) {
 	string path = "C:\\Games\\World_of_Tanks\\res\\scripts\\item_defs\\vehicles\\";
@@ -1217,296 +1410,317 @@ int main(int argc, char* argv[]) {
 		//break;
 	}
 
+#if 0
+
 
 
 #if defined(GROVER)
-   {
-      const char * fmtH = "%45s  |  %20s %10s %10s %10s %10s %10s %10s %10s %10s %10s \n";
-      const char * fmtR = "%45s  |  %20s %10d %10d %10.1f %10.1f %10d %10d %10d %10.1f %10.1f \n";
-      printf(fmtH, "Shell", "Kind", "Price", "Premium", "ExpRadius", "PierceFalloff", "Dmg.Armor", "Speed", "MaxDist", "Pierce.100", "Pierce.Max");
-      for (auto i = shellsList.list.begin(), e = shellsList.list.end(); i != e; ++i) {
-         printf( fmtR
-            , i->second.userString.c_str()
-            , i->second.kind.c_str()
-            , i->second.price
-            , (int)i->second.isPremium
-            , (float)i->second.explosionRadius
-            , (float)i->second.piercingPowerLossFactorByDistance
-            , i->second.damage.armor
-            , i->second.speed
-            , i->second.maxDistance
-            , (float)i->second.piercingPower_at_100
-            , (float)i->second.piercingPower_at_max
-            );
-      }
-   }
-   printf("\n");
-   {
-      const char * fmtH = "%45s  |  %10s   %10s   %10s   %10s   %10s   %10s   %10s %10s   %10s  \n";
-      const char * fmtR = "%45s  |  %10.1f %10.1f %10.1f %10.1f %10.1f %10.1f %10d %10.1f %10.1f\n";
-      printf(fmtH, "Gun", "Impulse", "Recoil.amplitude", "Recoil.backoffTime", "Recoil.returnTime", "RotationSpeed", "ReloadTime", "MaxAmmo", "AimingTime", "ShotDispRadius");
-      for (auto k = gunsList.list.begin(), g = gunsList.list.end(); k != g; ++k)
-         printf( fmtR
-            , k->second.label.c_str()
-            , k->second.impulse
-            , k->second.recoil.amplitude
-            , k->second.recoil.backoffTime
-            , k->second.recoil.returnTime
-            , k->second.rotationSpeed
-            , k->second.reloadTime
-            , k->second.maxAmmo
-            , k->second.aimingTime
-            , k->second.shotDispersionRadius
-            );
-   }
-   printf("\n");
-   {
+{
+const char * fmtH = "%45s  |  %20s %10s %10s %10s %10s %10s %10s %10s %10
+ const char * fmtR = "%45s  |  %20s %10d %10d %10.1f %10.1f %10d %10d %10d
+ printf(fmtH, "Shell", "Kind", "Price", "Premium", "ExpRadius", "PierceFal
+ for (auto i = shellsList.list.begin(), e = shellsList.list.end(); i != e;
+printf(fmtR
+ , i->second.userString.c_str()
+ , i->second.kind.c_str()
+ , i->second.price
+ , (int)i->second.isPremium
+ , (float)i->second.explosionRadius
+ , (float)i->second.piercingPowerLossFactorByDistance
+ , i->second.damage.armor
+ , i->second.speed
+ , i->second.maxDistance
+ , (float)i->second.piercingPower_at_100
+ , (float)i->second.piercingPower_at_max
+ );
+}
 
-      cout.precision(1);
-      cout 
-         << setw(50) << "Tank |" 
-         << setw(10) << "Price"
-         << setw(10) << "Premium" 
-         << setw(10) << "Level"
-         << setw(14) << "SpeedLimits"
-         << setw(12) << "RepairCost" 
-         << setw(25) << "Hull.Armor.primaryArmor"
-         << setw(10) << "Hull.Weight" 
-         << setw(16) << "Hull.MaxHealth" 
-         << std::endl;
+}
+printf("\n");
+{
+const char * fmtH = "%45s  |  %10s   %10s   %10s   %10s   %10s   %10s   %
+ const char * fmtR = "%45s  |  %10.1f %10.1f %10.1f %10.1f %10.1f %10.1f %
+ printf(fmtH, "Gun", "Impulse", "Recoil.amplitude", "Recoil.backoffTime",
+for (auto k = gunsList.list.begin(), g = gunsList.list.end(); k != g; ++k
+ printf(fmtR
+ , k->second.label.c_str()
+ , k->second.impulse
+ , k->second.recoil.amplitude
+ , k->second.recoil.backoffTime
+ , k->second.recoil.returnTime
+ , k->second.rotationSpeed
+ , k->second.reloadTime
+ , k->second.maxAmmo
+ , k->second.aimingTime
+ , k->second.shotDispersionRadius
+ );
+}
+printf("\n");
+{
 
-      for (auto k = tanksList.list.begin(); k != tanksList.list.end(); ++k)
-      cout 
-         << setw(50) << k->userString
-         << setw(10) << k->price
-         << setw(10) << k->premium
-         << setw(10) << k->level
-         << setw(14) << k->speedLimits.forward
-         << setw(12) << k->repairCost
-         << setw(25) << k->hull.primaryArmor
-         << setw(10) << k->hull.weight
-         << setw(16) << k->hull.maxHealth
-         << std::endl;
-   }
-#endif 
+cout.precision(1);
+cout
+ << setw(50) << "Tank |"
+ << setw(10) << "Price"
+ << setw(10) << "Premium"
+ << setw(10) << "Level"
+ << setw(14) << "SpeedLimits"
+ << setw(12) << "RepairCost"
+ << setw(25) << "Hull.Armor.primaryArmor"
+ << setw(10) << "Hull.Weight"
+ << setw(16) << "Hull.MaxHealth"
+ << std::endl;
 
-
-
-
-
-#if 0
-	struct ShellTest {
-		double key;
-		Shell* value;
-		ShellTest(double key, Shell* value) : key(key), value(value) {}
-		bool operator <(const ShellTest& x) { return key > x.key; }
-	};
-	vector<ShellTest> shellTest;
-	for (auto i = shellsList.list.begin(), e = shellsList.list.end(); i != e; ++i) {
-		if (!i->second.notInShop && i->second.premium && i->second.kind != "HIGH_EXPLOSIVE")//i->second.price >= 400 && i->second.kind != "HIGH_EXPLOSIVE")
-			shellTest.push_back(ShellTest(i->second.damage.armor / (double)i->second.price, &i->second));
-	}
-	std::sort(shellTest.begin(), shellTest.end());
-	for (int i = 0; i < 80 && i < shellTest.size(); i++)
-		printf("%28s : %-17s : %-10g : %-4d : %-4d\n", shellTest[i].value->label.c_str(), shellTest[i].value->kind.c_str(), shellTest[i].value->damage.armor / (double)shellTest[i].value->price, shellTest[i].value->damage.armor, shellTest[i].value->price);
+for (auto k = tanksList.list.begin(); k != tanksList.list.end(); ++k)
+ cout
+ << setw(50) << k->userString
+ << setw(10) << k->price
+ << setw(10) << k->premium
+ << setw(10) << k->level
+ << setw(14) << k->speedLimits.forward
+ << setw(12) << k->repairCost
+ << setw(25) << k->hull.primaryArmor
+ << setw(10) << k->hull.weight
+ << setw(16) << k->hull.maxHealth
+ << std::endl;
+}
 #endif
 
-#if 0
-	struct ShellTest {
-		double key;
-		Shell* value;
-		ShellTest(double key, Shell* value) : key(key), value(value) {}
-		bool operator <(const ShellTest& x) { return key > x.key; }
-	};
-	vector<ShellTest> shellTest;
-	for (auto i = tanksList.list.begin(), e = tanksList.list.end(); i != e; ++i)
-		for (auto j = i->turrets.list.begin(), f = i->turrets.list.end(); j != f; ++j)
-			for (auto k = j->guns.list.begin(), g = j->guns.list.end(); k != g; ++k)
-				for (auto l = k->shots.list.begin(), h = k->shots.list.end(); l != h; ++l)
-					if (!l->notInShop && l->kind == "HIGH_EXPLOSIVE") {
-						//printf("%d : %g\n", l->damage.armor, atof(l->piercingPower.c_str()));
-						shellTest.push_back(ShellTest(l->damage.armor / atof(l->piercingPower.c_str()), &*l));
-					}
-	std::sort(shellTest.begin(), shellTest.end());
-	for (int i = 0; i < 250 && i < shellTest.size(); i++)
-		printf("%28s : %-17s : %-10g\n", shellTest[i].value->label.c_str(), shellTest[i].value->kind.c_str(), shellTest[i].key);
-#endif
+
+
+
 
 #if 0
-	struct ShellTest {
-		double key;
-		Shell* value;
-		Tank* tank;
-		ShellTest(double key, Shell* value, Tank* tank) : key(key), value(value), tank(tank) {}
-		bool operator <(const ShellTest& x) { return key < x.key; }
-	};
-	vector<ShellTest> shellTest;
-	for (auto i = tanksList.list.begin(), e = tanksList.list.end(); i != e; ++i)
-		for (auto k = i->turrets.list.back().guns.list.begin(), g = i->turrets.list.back().guns.list.end(); k != g; ++k)
-			for (auto l = k->shots.list.begin(), h = k->shots.list.end(); l != h; ++l) {
-				if (i->notInShop)
-					continue;
-				if (l->kind == "HIGH_EXPLOSIVE")
-					shellTest.push_back(ShellTest(HETier(atof(l->piercingPower.c_str()), l->damage.armor), &*l, &*i));
-				else if (l->kind == "ARMOR_PIERCING")
-					shellTest.push_back(ShellTest(APTier(atof(l->piercingPower.c_str())), &*l, &*i));
-				else if (l->kind == "ARMOR_PIERCING_CR")
-					shellTest.push_back(ShellTest(APTier(atof(l->piercingPower.c_str())), &*l, &*i));
-				else if (l->kind == "HOLLOW_CHARGE")
-					shellTest.push_back(ShellTest(APTier(atof(l->piercingPower.c_str())*0.96), &*l, &*i));
-				else
-					printf("%s\n", l->kind.c_str());
-			}
-	std::sort(shellTest.begin(), shellTest.end());
-	int printed = 0;
-	for (int i = 0; i < shellTest.size(); i++) {
-		if (i != 0 && shellTest[i].value->label == shellTest[i-1].value->label && shellTest[i].key == shellTest[i-1].key)
-			continue;
-		if (printed++ % 5 && shellTest[i].value->label.find("HESH") == string::npos && shellTest[i].value->label.find("170mm") == string::npos)
-			continue;
-		printf("%20s : %-17s : %-10g\n", shellTest[i].value->label.c_str(), shellTest[i].value->kind.c_str(), shellTest[i].key);
-		//printf("%20s : %-17s : %-17s : %-10g\n", shellTest[i].value->label.c_str(), shellTest[i].tank->label.c_str(), shellTest[i].value->kind.c_str(), shellTest[i].key);
-	}
+ struct ShellTest {
+double key;
+Shell* value;
+ShellTest(double key, Shell* value) : key(key), value(value) {}
+bool operator <(const ShellTest& x) { return key > x.key; }
+
+};
+vector<ShellTest> shellTest;
+for (auto i = shellsList.list.begin(), e = shellsList.list.end(); i != e
+ if (!i->second.notInShop && i->second.premium && i->second.kind
+ shellTest.push_back(ShellTest(i->second.damage.armor / (
+}
+std::sort(shellTest.begin(), shellTest.end());
+for (int i = 0; i < 80 && i < shellTest.size(); i++)
+ printf("%28s : %-17s : %-10g : %-4d : %-4d\n", shellTest[i].valu
+ #endif
+
+#if 0
+ struct ShellTest {
+double key;
+Shell* value;
+ShellTest(double key, Shell* value) : key(key), value(value) {}
+bool operator <(const ShellTest& x) { return key > x.key; }
+
+  };
+vector<ShellTest> shellTest;
+for (auto i = tanksList.list.begin(), e = tanksList.list.end(); i != e;
+for (auto j = i->turrets.list.begin(), f = i->turrets.list.end()
+ for (auto k = j->guns.list.begin(), g = j->guns.list.end
+ for (auto l = k->shots.list.begin(), h = k->shot
+ if (!l->notInShop && l->kind == "HIGH_EX
+                                               //printf("%d : %g\n", l->damage.
+shellTest.push_back(ShellTest(l -
+}
+std::sort(shellTest.begin(), shellTest.end());
+for (int i = 0; i < 250 && i < shellTest.size(); i++)
+ printf("%28s : %-17s : %-10g\n", shellTest[i].value->label.c_str
+ #endif
+
+#if 0
+ struct ShellTest {
+double key;
+Shell* value;
+Tank* tank;
+ShellTest(double key, Shell* value, Tank* tank) : key(key), valu
+ bool operator <(const ShellTest& x) { return key < x.key; }
+
+    };
+vector<ShellTest> shellTest;
+for (auto i = tanksList.list.begin(), e = tanksList.list.end(); i != e;
+for (auto k = i->turrets.list.back().guns.list.begin(), g = i->t
+ for (auto l = k->shots.list.begin(), h = k->shots.list.e
+ if (i->notInShop)
+ continue;
+if (l->kind == "HIGH_EXPLOSIVE")
+ shellTest.push_back(ShellTest(HETier(ato
+ else if (l->kind == "ARMOR_PIERCING")
+ shellTest.push_back(ShellTest(APTier(ato
+ else if (l->kind == "ARMOR_PIERCING_CR")
+ shellTest.push_back(ShellTest(APTier(ato
+ else if (l->kind == "HOLLOW_CHARGE")
+ shellTest.push_back(ShellTest(APTier(ato
+ else
+ printf("%s\n", l->kind.c_str());
+}
+std::sort(shellTest.begin(), shellTest.end());
+int printed = 0;
+for (int i = 0; i < shellTest.size(); i++) {
+if (i != 0 && shellTest[i].value->label == shellTest[i - 1].value -
+continue;
+if (printed++ % 5 && shellTest[i].value->label.find("HESH") == s
+ continue;
+printf("%20s : %-17s : %-10g\n", shellTest[i].value->label.c_str
+               //printf("%20s : %-17s : %-17s : %-10g\n", shellTest[i].value->l
+
+    }
 #endif
 
 #if defined(BASIC_SHELL_TEST) || 0
-	struct ShellTest {
-		double key;
-		Shell* value;
-		Tank* tank;
-		ShellTest(double key, Shell* value, Tank* tank) : key(key), value(value), tank(tank) {}
-		bool operator <(const ShellTest& x) { return key > x.key || key == x.key && value->label < x.value->label; }
-	};
-	vector<ShellTest> shellTest;
-	for (auto i = tanksList.list.begin(), e = tanksList.list.end(); i != e; ++i)
-		if (!i->notInShop)
-		for (auto k = i->turrets.list.back().guns.list.begin(), g = i->turrets.list.back().guns.list.end(); k != g; ++k)
-			for (auto l = k->shots.list.begin(), h = k->shots.list.end(); l != h; ++l) {
-				if (!l->isPremium)
-					continue;
-				//auto t = l->speed * sqrt(0.5) / l->gravity;
-				//auto x = l->speed * sqrt(0.5) * t;
-				//auto x = l->speed * l->speed / l->gravity;
-				//printf("%d %g\n", l->maxDistance, x);
-				auto x = MeasuredShell(*l).cost_per_damage;
-				if (x == 0)
-					continue;
-				shellTest.push_back(ShellTest(x, &*l, &*i));
-			}
-	std::sort(shellTest.begin(), shellTest.end());
-	int printed = 0;
-	for (int i = 0; i < shellTest.size(); i++) {
-		if (i != 0 && shellTest[i].value->label == shellTest[i-1].value->label && shellTest[i].key == shellTest[i-1].key)
-			continue;
-		//if (printed++ % 5 && shellTest[i].value->label.find("HESH") == string::npos && shellTest[i].value->label.find("170mm") == string::npos)
-		//	continue;
-		//printf("%20s : %-17s : %-10g\n", shellTest[i].value->label.c_str(), shellTest[i].value->kind.c_str(), shellTest[i].key);
-		printf("%20s : %-17s : %-17s : %-10g\n", shellTest[i].value->label.c_str(), shellTest[i].tank->label.c_str(), shellTest[i].value->kind.c_str(), shellTest[i].key);
-	}
+ struct ShellTest {
+double key;
+Shell* value;
+Tank* tank;
+ShellTest(double key, Shell* value, Tank* tank) : key(key), valu
+ bool operator <(const ShellTest& x) {
+            return key > x.key || key
+
+        };
+vector<ShellTest> shellTest;
+for (auto i = tanksList.list.begin(), e = tanksList.list.end(); i != e;
+if (!i->notInShop)
+ for (auto k = i->turrets.list.back().guns.list.begin(), g = i->t
+ for (auto l = k->shots.list.begin(), h = k->shots.list.e
+ if (!l->isPremium)
+ continue;
+                               //auto t = l->speed * sqrt(0.5) / l->gravity;
+                               //auto x = l->speed * sqrt(0.5) * t;
+                               //auto x = l->speed * l->speed / l->gravity;
+                               //printf("%d %g\n", l->maxDistance, x);
+auto x = MeasuredShell(*l).cost_per_damage;
+if (x == 0)
+ continue;
+shellTest.push_back(ShellTest(x, &*l, &*i));
+
+    }
+std::sort(shellTest.begin(), shellTest.end());
+int printed = 0;
+for (int i = 0; i < shellTest.size(); i++) {
+if (i != 0 && shellTest[i].value->label == shellTest[i - 1].value -
+continue;
+               //if (printed++ % 5 && shellTest[i].value->label.find("HESH") ==
+               //      continue;
+               //printf("%20s : %-17s : %-10g\n", shellTest[i].value->label.c_s
+printf("%20s : %-17s : %-17s : %-10g\n", shellTest[i].value->lab
+
+    }
 #endif
 
 #if 0
-	struct TankTest {
-		double key;
-		Gun* value;
-		Tank* tank;
-		TankTest(double key, Gun* value, Tank* tank) : key(key), value(value), tank(tank) {}
-		bool operator <(const TankTest& x) { return key > x.key; }
-	};
-	vector<TankTest> tankTest;
-	for (auto i = tanksList.list.begin(), e = tanksList.list.end(); i != e; ++i)
-		for (auto k = i->turrets.list.back().guns.list.begin(), g = i->turrets.list.back().guns.list.end(); k != g; ++k) {
-				if (i->notInShop)
-					continue;
-				tankTest.push_back(TankTest(shotsTier(k->shots.list), &*k, &*i));
-			}
-	std::sort(tankTest.begin(), tankTest.end());
-	int printed = 0;
-	for (int i = 0; i < tankTest.size() && i < 400; i++) {
-		if (i != 0 && tankTest[i].value->label == tankTest[i-1].value->label && tankTest[i].key == tankTest[i-1].key)
-			continue;
-		//if (printed++ % 3)
-		//	continue;
-		printf("%20s : %20s : %-10g\n", tankTest[i].tank->label.c_str(), tankTest[i].value->label.c_str(), tankTest[i].key);
-		//printf("%20s : %-17s : %-17s : %-10g\n", shellTest[i].value->label.c_str(), shellTest[i].tank->label.c_str(), shellTest[i].value->kind.c_str(), shellTest[i].key);
-	}
+ struct TankTest {
+double key;
+Gun* value;
+Tank* tank;
+TankTest(double key, Gun* value, Tank* tank) : key(key), value(v
+ bool operator <(const TankTest& x) { return key > x.key; }
+
+    };
+vector<TankTest> tankTest;
+for (auto i = tanksList.list.begin(), e = tanksList.list.end(); i != e;
+for (auto k = i->turrets.list.back().guns.list.begin(), g = i->t
+ if (i->notInShop)
+ continue;
+tankTest.push_back(TankTest(shotsTier(k->shots.l
+ }
+std::sort(tankTest.begin(), tankTest.end());
+int printed = 0;
+for (int i = 0; i < tankTest.size() && i < 400; i++) {
+if (i != 0 && tankTest[i].value->label == tankTest[i - 1].value->l
+ continue;
+               //if (printed++ % 3)
+               //      continue;
+printf("%20s : %20s : %-10g\n", tankTest[i].tank->label.c_str(),
+               //printf("%20s : %-17s : %-17s : %-10g\n", shellTest[i].value->l
+
+      }
 #endif
 
 #if 1
-	struct GunTest {
-		double key;
-		Gun* value;
-		Tank* tank;
-		GunTest(double key, Gun* value, Tank* tank) : key(key), value(value), tank(tank) {}
-		bool operator <(const GunTest& x) { return key > x.key; }
-	};
-	vector<GunTest> gunTest;
-	for (auto i = tanksList.list.begin(), e = tanksList.list.end(); i != e; ++i)
-		for (auto j = i->turrets.list.begin(), f = i->turrets.list.end(); j != f; ++j)
-			for (auto k = j->guns.list.begin(), g = j->guns.list.end(); k != g; ++k)
-				if (!i->notInShop && !k->burst.count) {
-					double r = k->clip.count ? 60.0 / k->clip.rate : k->reloadTime;
-					double t = k->shotDispersionFactors.afterShot;
-					t = log(sqrt(1.0 + t*t)) * k->aimingTime;
-					if (t > r)
-						gunTest.push_back(GunTest(t / r, &*k, &*i));
-				}
-	std::sort(gunTest.begin(), gunTest.end());
-	for (int i = 0; i < 200 && i < gunTest.size(); i++) {
-		auto& gun = *gunTest[i].value;
-		printf("%23s : %d : %3g : %-23s : %-6g : %-4g\n", gun.label.c_str(), (int)gun.level, gun.shotDispersionFactors.afterShot, gunTest[i].tank->label.c_str(), gun.aimingTime, gun.clip.count ? 60.0 / gun.clip.rate : gun.reloadTime);
-	}
+ struct GunTest {
+double key;
+Gun* value;
+Tank* tank;
+GunTest(double key, Gun* value, Tank* tank) : key(key), value(va
+ bool operator <(const GunTest& x) { return key > x.key; }
+
+      };
+vector<GunTest> gunTest;
+for (auto i = tanksList.list.begin(), e = tanksList.list.end(); i != e;
+for (auto j = i->turrets.list.begin(), f = i->turrets.list.end()
+ for (auto k = j->guns.list.begin(), g = j->guns.list.end
+ if (!i->notInShop && !k->burst.count) {
+double r = k->clip.count ? 60.0 / k->cli
+ double t = k->shotDispersionFactors.afte
+ t = log(sqrt(1.0 + t*t)) * k->aimingTime
+ if (t > r)
+ gunTest.push_back(GunTest(t / r,
+
+      }
+std::sort(gunTest.begin(), gunTest.end());
+for (int i = 0; i < 200 && i < gunTest.size(); i++) {
+auto& gun = *gunTest[i].value;
+printf("%23s : %d : %3g : %-23s : %-6g : %-4g\n", gun.label.c_st
+
+      }
 #endif
 
-	//for (auto i = tanksList.list.begin(), e = tanksList.list.end(); i != e; ++i)
-	//	if (!i->notInShop && i->label.find("T-") != string::npos)
-	//		for (auto j = i->turrets.list.begin(), f = i->turrets.list.end(); j != f; ++j)
-	//			for (auto k = j->guns.list.begin(), g = j->guns.list.end(); k != g; ++k) {
-	//				printf("%20s : %-20s\n", k->label.c_str(), i->label.c_str());
-	//				MeasuredGun::EffectiveDamage(i->level, k->shots.list);
-	//			}
-	//_getch();
-	//return 0;
-
-#if 0 
-   //defined(GUN_QUALITY_TEST) || 1
-	vector<MeasuredGun> gunTest;
-	for (auto i = tanksList.list.begin(), e = tanksList.list.end(); i != e; ++i)
-		if (!i->notInShop)// && i->label.find("GB32") != string::npos)
-		for (auto j = i->turrets.list.begin(), f = i->turrets.list.end(); j != f; ++j)
-			for (auto k = j->guns.list.begin(), g = j->guns.list.end(); k != g; ++k) {
-				MeasuredGun a(*k, &*i, &*j);
-				gunTest.push_back(MeasuredGun(*k, &*i, &*j, -a.getEffectiveDPM()));
-			}
-	std::sort(gunTest.begin(), gunTest.end());
-	for (int i = 0; i < 250 && i < gunTest.size(); i++) {
-		if (i && gunTest[i] == gunTest[i-1])
-			continue;
-		auto& gun = gunTest[i];
-		printf("%20s : %-20s : %-5g\n", gun.label.c_str(), gun.tank->label.c_str(), gun.getEffectiveDPM());
-		//printf("%20s : %-20s : %-2d - %-2d : %-5g\n", gun.label.c_str(), gun.tank->label.c_str(), (int)gun.level, (int)(gun.damagetier + 0.5), gun.accuracytier);
-	}
-#endif
-
-	//for (auto i = gunsList.list.begin(), e = gunsList.list.end(); i != e; ++i)
+       //for (auto i = tanksList.list.begin(), e = tanksList.list.end(); i != e
+       //      if (!i->notInShop && i->label.find("T-") != string::npos)
+       //              for (auto j = i->turrets.list.begin(), f = i->turrets.li
+       //                      for (auto k = j->guns.list.begin(), g = j->guns.
+       //                              printf("%20s : %-20s\n", k->label.c_str(
+       //                              MeasuredGun::EffectiveDamage(i->level, k
+       //                      }
+       //_getch();
+       //return 0;
 
 #if 0
-	for (auto i = tanksList.list.begin(), e = tanksList.list.end(); i != e; ++i)
-		if (i->turrets.list.size() == 0)
-			printf("%s\n", i->label.c_str());
-		else {
-			printf("%s : %g\n", i->label.c_str(), i->turrets.list[0].maxHealth);
-			//Tank::Turret& t = i->turrets.list[0];
-			//printf("%s\n", i->turrets.list[0].label.c_str());
-			//printf("%s : %f\n", i->turrets.list[0].maxHealth);
-		}
-		//fprintf(stdout, "%s %d\n", i->label.c_str(), i->radios.list.size());//[0].distance);
+   //defined(GUN_QUALITY_TEST) || 1
+vector<MeasuredGun> gunTest;
+for (auto i = tanksList.list.begin(), e = tanksList.list.end(); i != e;
+if (!i->notInShop)// && i->label.find("GB32") != string::npos)
+ for (auto j = i->turrets.list.begin(), f = i->turrets.list.end()
+ for (auto k = j->guns.list.begin(), g = j->guns.list.end
+ MeasuredGun a(*k, &*i, &*j);
+gunTest.push_back(MeasuredGun(*k, &*i, &*j, -a.g
+ }
+std::sort(gunTest.begin(), gunTest.end());
+for (int i = 0; i < 250 && i < gunTest.size(); i++) {
+if (i && gunTest[i] == gunTest[i - 1])
+ continue;
+auto& gun = gunTest[i];
+printf("%20s : %-20s : %-5g\n", gun.label.c_str(), gun.tank->lab
+               //printf("%20s : %-20s : %-2d - %-2d : %-5g\n", gun.label.c_str(
 
-	//auto f = fopen("out.csv", "rb");
-	//for (auto i = tanksList.list.begin(), e = tanksList.list.end(); i != e; ++i)
-		//printf("%s\n", i->label ? i->label : "???");
-		//fprintf(stdout, "%s %d\n", i->label, 0);//i->turrets.list[0].guns.list[0].shots.list[0].speed);
-	//}
+        }
 #endif
+
+       //for (auto i = gunsList.list.begin(), e = gunsList.list.end(); i != e;
+
+#if 0
+ for (auto i = tanksList.list.begin(), e = tanksList.list.end(); i != e;
+if (i->turrets.list.size() == 0)
+ printf("%s\n", i->label.c_str());
+else {
+printf("%s : %g\n", i->label.c_str(), i->turrets.list[0]
+                       //Tank::Turret& t = i->turrets.list[0];
+                       //printf("%s\n", i->turrets.list[0].label.c_str());
+                       //printf("%s : %f\n", i->turrets.list[0].maxHealth);
+
+        }
+               //fprintf(stdout, "%s %d\n", i->label.c_str(), i->radios.list.si
+
+       //auto f = fopen("out.csv", "rb");
+       //for (auto i = tanksList.list.begin(), e = tanksList.list.end(); i != e
+               //printf("%s\n", i->label ? i->label : "???");
+               //fprintf(stdout, "%s %d\n", i->label, 0);//i->turrets.list[0].g
+       //}
+#endif
+#endif
+
+
 	_getch();
 }
