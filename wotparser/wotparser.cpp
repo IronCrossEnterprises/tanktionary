@@ -3,14 +3,10 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <conio.h>
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
-#include <algorithm>
-#include <conio.h>
-#include <math.h>
-
-#include <iostream>
-#include <iomanip>
+#include "tank.h"
 
 using std::string;
 using std::vector;
@@ -18,7 +14,7 @@ using std::map;
 using std::pair;
 using std::make_pair;
 
-enum Nation { CHINA, FRANCE, GERMANY, JAPAN, UK, USA, USSR } nation;
+namespace {
 enum TagKind { TAG_ELEMENT, TAG_STRING, TAG_NUMBER, TAG_FLOATS, TAG_BOOLEAN, TAG_HEX64 };
 
 struct DataDescriptor {
@@ -32,6 +28,7 @@ struct ElementDescriptor {
 };
 
 vector<const char*> dictionary;
+Nation current_nation;
 const char* tag;
 const char* stream;
 unsigned size;
@@ -136,7 +133,6 @@ bool Case(double& data, const char* query = 0) {
 struct Element {
 	virtual void ParseSelf() { kind == TAG_STRING && size == 0 || Fail(); }
 	virtual void ParseTag() { Fail(); }
-	Nation nation;
 	string label;
 };
 
@@ -152,7 +148,6 @@ bool Case(Element& element, const char* query = 0) {
 	size = desc.end;
 	kind = desc.kind;
 	element.label = tag;
-	element.nation = nation;
 	element.ParseSelf();
 	unsigned priorEnd = desc.end;
 	for (auto i = elements.begin(), e = elements.end(); i != e; ++i) {
@@ -178,19 +173,19 @@ double ParseNums(const char* p, int i) {
 // Shells
 //==============================================================================
 
-struct Shell : Element {
-	struct Price : Element {
-		Price(Shell& shell) : shell(shell) {}
+struct ShellElement : Element {
+	struct PriceElement : Element {
+		PriceElement(ShellElement& shell) : shell(shell) {}
 		void ParseSelf() override { int i; Case(i) && (shell.price = i, 1) || Fail(); }
 		void ParseTag() override {
 			Ignore("gold") && (shell.price *= 400, shell.isPremium = true) || Fail();
 		}
-		Shell& shell;
+		ShellElement& shell;
 	};
 
-	Shell() : explosionRadius(0), isPremium(false), piercingPowerLossFactorByDistance(0.0), notInShop(false) {}
+	ShellElement() : explosionRadius(0), isPremium(false), piercingPowerLossFactorByDistance(0.0), notInShop(false) {}
 
-	struct Damage : Element {
+	struct DamageElement : Element {
 		void ParseTag() override {
 			Case(armor, "armor") ||
 			Case(devices, "devices") ||
@@ -204,7 +199,7 @@ struct Shell : Element {
 		string temp;
 		Ignore("id") ||
 		Case(price, "price") ||
-		Case(Price(*this), "price") ||
+		Case(PriceElement(*this), "price") ||
 		Case(kind, "kind") ||
 		Case(icon, "icon") ||
 		Case(userString, "userString") ||
@@ -239,7 +234,7 @@ struct Shell : Element {
 	bool isTracer;
 	double explosionRadius;
 	double piercingPowerLossFactorByDistance;
-	Damage damage;
+	DamageElement damage;
 	bool notInShop;
 	// From shot!
 	double defaultPortion;
@@ -250,22 +245,22 @@ struct Shell : Element {
 	double piercingPower_at_max;
 };
 
-static struct ShellsList : Element {
+static struct ShellsListElement : Element {
 	void ParseTag() override {
-		Shell shell;
+		ShellElement shell;
 		Ignore("icons") ||
 		Case(shell) && (list[shell.label] = shell, 1);
 	}
 
-	map<string, Shell> list;
+	map<string, ShellElement> list;
 } shellsList;
 
 //==============================================================================
 // Helpers
 //==============================================================================
 
-struct Unlocks : Element {
-	struct Unlock : Element {
+struct UnlocksElement : Element {
+	struct UnlockElement : Element {
 		enum Kind { VEHICLE, GUN, TURRET, ENGINE, CHASSIS, RADIO };
 		void ParseSelf() override {
 			if (!strcmp(tag, "vehicle")) kind = VEHICLE;
@@ -287,15 +282,15 @@ struct Unlocks : Element {
 	};
 
 	void ParseTag() override {
-		list.push_back(Unlock());
+		list.push_back(UnlockElement());
 		Case(list.back()) || Fail();
 	}
 
-	vector<Unlock> list;
+	vector<UnlockElement> list;
 };
 
-struct Component : Element {
-	Component() : notInShop(false), weight(0) {}
+struct ComponentElement : Element {
+	ComponentElement() : notInShop(false), weight(0) {}
 
 	bool ParseComponent() {
 		return
@@ -322,7 +317,7 @@ struct Component : Element {
 	double level; // should be int but...
 	double price; // should be int but...
 	bool notInShop;
-	Unlocks unlocks;
+	UnlocksElement unlocks;
 	double weight; // should be int but...
 	double maxHealth;
 	double maxRegenHealth; // apparently fractional health is a thing
@@ -333,7 +328,7 @@ struct Component : Element {
 // Radios
 //==============================================================================
 
-struct Radio : Component {
+struct RadioElement : ComponentElement {
 	void ParseSelf() override {
 		string shared;
 		Case(shared) && (shared == "" || shared == "shared") || Fail();
@@ -347,22 +342,22 @@ struct Radio : Component {
 	int distance;
 };
 
-static struct RadiosList : Element {
+static struct RadiosListElement : Element {
 	void ParseTag() override {
-		Radio radio;
+		RadioElement radio;
 		Ignore("ids") ||
 		Case(*this, "shared") ||
 		Case(radio) && (list[radio.label] = radio, 1);
 	}
 
-	map<string, Radio> list;
+	map<string, RadioElement> list;
 } radiosList;
 
 //==============================================================================
 // Engines
 //==============================================================================
 
-struct Engine : Component {
+struct EngineElement : ComponentElement {
 	void ParseSelf() override {
 		string shared;
 		Case(shared) && (shared == "" || shared == "shared") || Fail();
@@ -380,22 +375,22 @@ struct Engine : Component {
 	double fireStartingChance;
 };
 
-static struct EnginesList : Element {
+static struct EnginesListElement : Element {
 	void ParseTag() override {
-		Engine engine;
+		EngineElement engine;
 		Ignore("ids") ||
 		Case(*this, "shared") ||
 		Case(engine) && (list[engine.label] = engine, 1);
 	}
 
-	map<string, Engine> list;
+	map<string, EngineElement> list;
 } enginesList;
 
 //==============================================================================
 // FuelTanks
 //==============================================================================
 
-struct FuelTank : Element {
+struct FuelTankElement : Element {
 	void ParseSelf() override {
 		string shared;
 		Case(shared) && (shared == "" || shared == "shared") || Fail();
@@ -421,21 +416,21 @@ struct FuelTank : Element {
 
 static struct FuelTanksList : Element {
 	void ParseTag() override {
-		FuelTank fuelTank;
+		FuelTankElement fuelTank;
 		Ignore("ids") ||
 		Case(*this, "shared") ||
 		Case(fuelTank) && (list[fuelTank.label] = fuelTank, 1);
 	}
 
-	map<string, FuelTank> list;
+	map<string, FuelTankElement> list;
 } fuelTanksList;
 
 //==============================================================================
 // Guns
 //==============================================================================
 
-struct Gun : Component {
-	struct Recoil : Element {
+struct GunElement : ComponentElement {
+	struct RecoilElement : Element {
 		void ParseTag() override {
 			Case(lodDist, "lodDist") ||
 			Case(amplitude, "amplitude") ||
@@ -449,8 +444,8 @@ struct Gun : Component {
 		double returnTime;
 	};
 
-	struct ClipBurst : Element {
-		ClipBurst() : count(0), rate(0) {}
+	struct ClipBurstElement : Element {
+		ClipBurstElement() : count(0), rate(0) {}
 		void ParseTag() override {
 			Case(count, "count") ||
 			Case(rate, "rate") ||
@@ -460,7 +455,7 @@ struct Gun : Component {
 		int rate;
 	};
 
-	struct ShotDispersionFactors : Element {
+	struct ShotDispersionFactorsElement : Element {
 		void ParseTag() override {
 			Case(turretRotation, "turretRotation") ||
  			Case(afterShot, "afterShot") ||
@@ -472,15 +467,15 @@ struct Gun : Component {
 		double whileGunDamaged;
 	};
 
-	struct Shots : Element {
+	struct ShotsElement : Element {
 		void ParseTag() override {
 			list.push_back(shellsList.list.find(tag)->second);
 			Case(list.back()) || Fail();
 		}
-		vector<Shell> list;
+		vector<ShellElement> list;
 	};
 
-	struct ExtraPitchLimits : Element {
+	struct ExtraPitchLimitsElement : Element {
 		void ParseTag() override {
 			Case(front, "front") ||
 			Case(back, "back") ||
@@ -522,7 +517,7 @@ struct Gun : Component {
 	}
 
 	double impulse;
-	Recoil recoil;
+	RecoilElement recoil;
 	string effects;
 	string pitchLimits;
 	string turretYawLimits;
@@ -530,38 +525,38 @@ struct Gun : Component {
 	double reloadTime;
 	int maxAmmo;
 	double aimingTime;
-	ClipBurst clip;
-	ClipBurst burst;
+	ClipBurstElement clip;
+	ClipBurstElement burst;
 	double shotDispersionRadius;
-	ShotDispersionFactors shotDispersionFactors;
-	Shots shots;
-	ExtraPitchLimits extraPitchLimits;
+	ShotDispersionFactorsElement shotDispersionFactors;
+	ShotsElement shots;
+	ExtraPitchLimitsElement extraPitchLimits;
 };
 
-static struct GunsList : Element {
+static struct GunsListElement : Element {
 	void ParseTag() override {
-		Gun gun;
+		GunElement gun;
 		Ignore("ids") ||
 		Case(*this, "shared") ||
 		Case(gun) && (list[gun.label] = gun, 1);
 
 	}
-	map<string, Gun> list;
+	map<string, GunElement> list;
 } gunsList;
 
 //==============================================================================
 // Tanks
 //==============================================================================
 
-struct ArmorValue : Element {
-	ArmorValue() : value(-1.0), vehicleDamageFactor(1.0) {}
+struct ArmorValueElement : Element {
+	ArmorValueElement() : value(-1.0), vehicleDamageFactor(1.0) {}
 	void ParseSelf() override { Case(value) || Fail(); }
 	void ParseTag() override { Case(vehicleDamageFactor, "vehicleDamageFactor") || Fail(); }
 	double value;
 	double vehicleDamageFactor;
 };
 
-struct ArmorSet : Element {
+struct ArmorSetElement : Element {
 	void ParseTag() override {
 		Case(armor[0].value, "armor_1") || Case(armor[0], "armor_1") ||
 		Case(armor[1].value, "armor_2") || Case(armor[1], "armor_2") ||
@@ -590,12 +585,12 @@ struct ArmorSet : Element {
 		Ignore("radioman_2") ||
 		Fail();
 	}
-	ArmorValue armor[16];
+	ArmorValueElement armor[16];
 	double surveyingDevice;
 };
 
-struct DeviceHealth : Element {
-	DeviceHealth(double chanceToHit) : chanceToHit(chanceToHit) {}
+struct DeviceHealthElement : Element {
+	DeviceHealthElement(double chanceToHit) : chanceToHit(chanceToHit) {}
 	void ParseTag() override {
 		Case(maxHealth, "maxHealth") ||
 		Case(maxRegenHealth, "maxRegenHealth") ||
@@ -609,18 +604,15 @@ struct DeviceHealth : Element {
 	double chanceToHit;
 };
 
-struct Turret : Component {
-	Turret() : invisibilityFactor(-1.0f), turretRotatorHealth(.45), surveyingDeviceHealth(.45) {}
-
-	struct Guns : Element {
+struct TurretElement : ComponentElement {
+	TurretElement() : invisibilityFactor(-1.0f), turretRotatorHealth(.45), surveyingDeviceHealth(.45) {}
+	struct GunsElement : Element {
 		void ParseTag() override {
 			list.push_back(gunsList.list.find(tag)->second);
 			Case(list.back()) || Fail();
 		}
-
-		vector<Gun> list;
+		vector<GunElement> list;
 	};
-
 	void ParseTag() override {
 		Ignore("icon") ||
 		Ignore("models") ||
@@ -642,39 +634,20 @@ struct Turret : Component {
 		//Case(yawLimits, "yawLimits") && (printf("<%s>", label.c_str()), 1) ||
 		ParseComponent();
 	}
-	ArmorSet armor;
+	ArmorSetElement armor;
 	string primaryArmor;
 	double rotationSpeed;
-	DeviceHealth turretRotatorHealth;
+	DeviceHealthElement turretRotatorHealth;
 	double circularVisionRadius;
-	DeviceHealth surveyingDeviceHealth;
-	Guns guns;
+	DeviceHealthElement surveyingDeviceHealth;
+	GunsElement guns;
 	//string yawLimits;
 	double invisibilityFactor;
 };
 
-struct Tanker {
-	enum Role { NONE, COMMANDER = 1, GUNNER = 2, DRIVER = 4, RADIOMAN = 8, LOADER = 16 } roles[4];
-	void Set(Role primary, const string& extra) {
-		roles[0] = primary;
-		Role* next = roles + 1;
-		for (size_t i = 0, e = extra.length(); i < e; i += 5) { // +5 for separating sequence 13 10 9 9 9
-			if (extra.find("gunner", i) == i) { *next++ = GUNNER; i += strlen("gunner"); }
-			else if (extra.find("radioman", i) == i) { *next++ = RADIOMAN; i += strlen("radioman"); }
-			else if (extra.find("driver", i) == i) { *next++ = DRIVER; i += strlen("driver"); }
-			else if (extra.find("loader", i) == i) { *next++ = LOADER; i += strlen("loader"); }
-			else {
-				fprintf(stderr, "Unparsable role string! : (%s)\n", extra.c_str());
-				exit(1);
-			}
-		}
-		while (next < roles + 4)
-			*next++ = NONE;
-	}
-};
 
-struct Chassis : Component {
-	struct ChassisArmor: Element {
+struct ChassisElement : ComponentElement {
+	struct ChassisArmorElement : Element {
 		void ParseTag() override {
 			Case(leftTrack, "leftTrack") ||
 			Case(rightTrack, "rightTrack") ||
@@ -684,7 +657,7 @@ struct Chassis : Component {
 		int rightTrack;
 	};
 
-	struct ShotDispersionFactors : Element {
+	struct ShotDispersionFactorsElement : Element {
 		void ParseTag() override {
 			Case(vehicleMovement, "vehicleMovement") ||
 			Case(vehicleRotation, "vehicleRotation") ||
@@ -722,7 +695,7 @@ struct Chassis : Component {
 		Ignore("trackNodes") ||
 		ParseComponent();
 	}
-	ChassisArmor armor;
+	ChassisArmorElement armor;
 	int maxClimbAngle;
 	double navmeshGirth;
 	int maxLoad;
@@ -730,31 +703,38 @@ struct Chassis : Component {
 	int brakeForce;
 	bool rotationIsAroundCenter;
 	double rotationSpeed;
-	ShotDispersionFactors shotDispersionFactors;
+	ShotDispersionFactorsElement shotDispersionFactors;
 	double bulkHealthFactor;
 };
 
-struct Tank : Element {
-	struct Crew : Element {
-
-		vector<Tanker> tankers;
+struct TankElement : Element {
+	struct CrewElement : Element {
+		vector<char> tankers;
 		void ParseTag() override {
-			std::string extra;
-			Tanker::Role role = Tanker::NONE;
-			Case(extra, "commander") ||
-			Case(extra, "gunner") ||
-			Case(extra, "radioman") ||
-			Case(extra, "driver") ||
-			Case(extra, "loader") ||
+			string extra;
+			char tanker = 0;
+			Case(extra, "commander") && (tanker |= COMMANDER) ||
+			Case(extra, "gunner") && (tanker |= GUNNER) ||
+			Case(extra, "driver") && (tanker |= DRIVER) ||
+			Case(extra, "radioman") && (tanker |= RADIOMAN) ||
+			Case(extra, "loader") && (tanker |= LOADER) ||
 			Fail();
-			if (role == Tanker::NONE)
-				return;
-			tankers.push_back(Tanker());
-			tankers.back().Set(role, extra);
+			for (size_t i = 0, e = extra.length(); i < e;) {
+				if (extra.find("gunner", i) == i) { tanker |= ALSO_GUNNER; i += strlen("gunner"); }
+				else if (extra.find("driver", i) == i) { tanker |= DRIVER; i += strlen("driver"); } // only Karl...
+				else if (extra.find("radioman", i) == i) { tanker |= ALSO_RADIOMAN; i += strlen("radioman"); }
+				else if (extra.find("loader", i) == i) { tanker |= ALSO_LOADER; i += strlen("loader"); }
+				else {
+					fprintf(stderr, "Unparsable role string! : (%s) %d\n", extra.c_str(), (int)i);
+					exit(1);
+				}
+				for (; i < e && extra[i] < 'a'; i++); // consume inconsistent whitespace
+			}
+			tankers.push_back(tanker);
 		}
 	};
 
-	struct SpeedLimits : Element {
+	struct SpeedLimitsElement : Element {
 		void ParseTag() override {
 			Case(forward, "forward") || Case(backward, "backward") || Fail();
 		}
@@ -762,8 +742,8 @@ struct Tank : Element {
 		double backward;
 	};
 
-	struct Hull : Element {
-		Hull() : ammoBayHealth(.27) {}
+	struct HullElement : Element {
+		HullElement() : ammoBayHealth(.27) {}
 		void ParseTag() override {
 			Ignore("models") ||
 			Ignore("swinging") ||
@@ -780,30 +760,30 @@ struct Tank : Element {
 			Ignore("emblemSlots") ||
 			Fail();
 		}
-		ArmorSet armor;
+		ArmorSetElement armor;
 		string primaryArmor;
 		double weight;
 		int maxHealth;
-		DeviceHealth ammoBayHealth;
+		DeviceHealthElement ammoBayHealth;
 	};
 
-	struct Chassiss : Element {
+	struct ChassissElement : Element {
 		void ParseTag() override {
-			list.push_back(Chassis());
+			list.push_back(ChassisElement());
 			Case(list.back()) || Fail();
 		}
-		vector<Chassis> list;
+		vector<ChassisElement> list;
 	};
 
-	struct Turrets : Element {
+	struct TurretsElement : Element {
 		void ParseTag() override {
-			list.push_back(Turret());
+			list.push_back(TurretElement());
 			Case(list.back()) || Fail();
 		}
-		vector<Turret> list;
+		vector<TurretElement> list;
 	};
 
-	struct Engines : Element {
+	struct EnginesElement : Element {
 		void ParseTag() override {
 			list.push_back(enginesList.list.find(tag)->second);
 			Case(list.back()) ||
@@ -811,10 +791,10 @@ struct Tank : Element {
 			Fail();
 		}
 
-		vector<Engine> list;
+		vector<EngineElement> list;
 	};
 
-	struct FuelTanks : Element {
+	struct FuelTanksElement : Element {
 		void ParseTag() override {
 			list.push_back(fuelTanksList.list.find(tag)->second);
 			Case(list.back()) ||
@@ -822,10 +802,10 @@ struct Tank : Element {
 			Fail();
 		}
 
-		vector<FuelTank> list;
+		vector<FuelTankElement> list;
 	};
 
-	struct Radios : Element {
+	struct RadiosElement : Element {
 		void ParseTag() override {
 			list.push_back(radiosList.list.find(tag)->second);
 			Case(list.back()) ||
@@ -833,19 +813,24 @@ struct Tank : Element {
 			Fail();
 		}
 
-		vector<Radio> list;
+		vector<RadioElement> list;
 	};
 
-	struct Price : Element {
-		Price(Tank& tank) : tank(tank) {}
+	struct PriceElement : Element {
+		PriceElement(TankElement& tank) : tank(tank) {}
 		void ParseSelf() override { int i; Case(i) && (tank.price = i, 1) || Fail(); }
 		void ParseTag() override {
 			Ignore("gold") && (tank.premium = true, 1) || Fail();
 		}
-		Tank& tank;
+		TankElement& tank;
 	};
 
-	Tank() : notInShop(false), premium(false) {}
+	TankElement() : notInShop(false), premium(false) {}
+
+	void ParseSelf() override {
+		nation = current_nation;
+		Element::ParseSelf();
+	}
 
 	void ParseTag() override {
 		Ignore("id") ||
@@ -853,7 +838,7 @@ struct Tank : Element {
 		Case(userString, "shortUserString") ||
 		Case(description, "description") ||
 		Case(price, "price") ||
-		Case(Price(*this), "price") ||
+		Case(PriceElement(*this), "price") ||
 		Case(notInShop, "notInShop") ||
 		Case(tags, "tags") ||
 		Case(level, "level") ||
@@ -879,6 +864,7 @@ struct Tank : Element {
 		Fail();
 	}
 
+	Nation nation;
 	string userString;
 	string shortUserString;
 	string description;
@@ -887,16 +873,16 @@ struct Tank : Element {
 	bool premium;
 	string tags;
 	int level;
-	Crew crew;
-	SpeedLimits speedLimits;
+	CrewElement crew;
+	SpeedLimitsElement speedLimits;
 	double repairCost;
 	double crewXpFactor;
-	Hull hull;
-	Chassiss chassiss;
-	Turrets turrets;
-	Engines engines;
-	FuelTanks fuelTanks;
-	Radios radios;
+	HullElement hull;
+	ChassissElement chassiss;
+	TurretsElement turrets;
+	EnginesElement engines;
+	FuelTanksElement fuelTanks;
+	RadiosElement radios;
 };
 
 //==============================================================================
@@ -954,11 +940,10 @@ void ReadHeader(const char* data) {
 
 static struct TanksList : Element {
 	void ParseTag() override {
-		list.push_back(Tank());
+		list.push_back(TankElement());
 		Case(list.back());
 	}
-
-	vector<Tank> list;
+	vector<TankElement> list;
 } tanksList;
 
 void ReadNation(const string& path) {
@@ -1015,397 +1000,182 @@ void ReadNation(const string& path) {
 	ReadHeader(tanksFile.data);
 	tag = path.c_str();
 	Case(tanksList);
-	for (auto i = tanksList.list.begin(), e = tanksList.list.end(); i != e; ++i)
-		if (i->nation == nation) {
-			FileView tankFile((path + i->label + ".xml").c_str());
-			if (tankFile.err) {
-				fprintf(stderr, "File open error: %s\n", tankFile.err);
-				continue;
-			}
-			ReadHeader(tankFile.data);
-			//printf("parsing : %s\n", i->label.c_str());
-			tag = i->label.c_str();
-			Case(*i);
-		}
-}
-
-
-
-
-
-
-
-
-
-
-struct TankInstance {
-  enum Skills { COMMANDER = 1, GUNNER = 2, DRIVER = 4, RADIO_OPERATOR = 8, LOADER = 16 };
-  struct Device { double health, regenHealth, repairCost, chanceToHit; };
-  struct Component : Device {
-    string name, tags;
-    double tier, price, weight;
-  };
-  struct Hull : Component { struct { double front, side, back; } armor; } hull;
-  struct Chassis : Component {
-    struct { double left, right; } armor;
-    double maxLoad, movementDispersion;
-    struct { double hard, medium, soft; } terrainResistance;
-    struct { double forward, backward; } speedLimits;
-    struct { double speed, dispersion; bool isCentered; } rotation;
-  } chassis;
-  struct Turret : Component {
-    double rotationSpeed, visionRadius;
-    Device rotator, optics;
-    struct { double front, side, rear; } armor;
-    struct { double left, right; } yawLimits;
-  } turret;
-  struct Engine : Component { double power, chanceOfFire; } engine;
-  struct Radio : Component { double signalRadius; } radio;
-  struct Gun : Component {
-    double rotationSpeed, reloadTime, ammo, aimTime;
-    struct { double size, burst, delay; } magazine;
-    struct { double base, movement, shot, damaged; } dispersion;
-    struct { struct { double up, down; } basic, front, back; } pitchLimits;
-  } gun;
-  struct Shell : Component {
-    enum Kind { SLOT_UNUSED, AP, APCR, HEAT, HE };
-    bool isPremium;
-    double caliber, explosionRadius, damage, moduleDamage, speed, gravity, maxRange, penAt100m, penAt720m;
-  } shells[3];
-  double stockPowerToWeight;
-  Device ammoBay;
-  Component fuelTank;
-  char crew[8];
-  bool isPremium;
-  Nation nation;
-
-  TankInstance(const Tank& h, const ::Turret& t, const ::Gun& g) {
-    const ::FuelTank& f = h.fuelTanks.list.back();
-    const ::Chassis& c = h.chassiss.list.back();
-    const ::Engine& e = h.engines.list.back();
-    const ::Radio& r = h.radios.list.back();
-    hull.health = h.hull.maxHealth;
-    hull.regenHealth = 0;
-    hull.repairCost = h.repairCost;
-    hull.chanceToHit = 1;
-    hull.name = h.label;
-    hull.tags = h.tags;
-    hull.tier = h.level;
-    hull.price = h.price;
-    hull.weight = h.hull.weight;
-    hull.armor.front = 0; // FIXME
-    hull.armor.side = 0; // FIXME
-    hull.armor.back = 0; // FIXME
-    chassis.health = c.maxHealth;
-    chassis.regenHealth = c.maxRegenHealth;
-    chassis.repairCost = c.repairCost;
-    chassis.chanceToHit = 1;
-    chassis.name = c.label;
-    chassis.tags = c.tags;
-    chassis.tier = c.level;
-    chassis.price = c.price;
-    chassis.weight = c.weight;
-    chassis.armor.left = c.armor.leftTrack;
-    chassis.armor.right = c.armor.rightTrack;
-    chassis.maxLoad = c.maxLoad;
-    chassis.movementDispersion = c.shotDispersionFactors.vehicleMovement;
-    chassis.terrainResistance.hard = ParseNums(c.terrainResistance.c_str(), 0);
-    chassis.terrainResistance.medium = ParseNums(c.terrainResistance.c_str(), 1);
-    chassis.terrainResistance.soft = ParseNums(c.terrainResistance.c_str(), 2);
-    chassis.speedLimits.forward = h.speedLimits.forward;
-    chassis.speedLimits.backward = h.speedLimits.backward;
-    chassis.rotation.speed = c.rotationSpeed;
-    chassis.rotation.dispersion = c.shotDispersionFactors.vehicleRotation;
-    chassis.rotation.isCentered = c.rotationIsAroundCenter;
-    turret.health = t.maxHealth;
-    turret.regenHealth = 0;
-    turret.repairCost = t.repairCost;
-    turret.chanceToHit = 1;
-    turret.name = t.label;
-    turret.tags = t.tags;
-    turret.tier = t.level;
-    turret.price = t.price;
-    turret.weight = t.weight;
-    turret.rotationSpeed = t.rotationSpeed;
-    turret.visionRadius = t.circularVisionRadius;
-    turret.rotator.health = t.turretRotatorHealth.maxHealth;
-    turret.rotator.regenHealth = t.turretRotatorHealth.maxRegenHealth;
-    turret.rotator.repairCost = t.turretRotatorHealth.repairCost;
-    turret.rotator.chanceToHit = t.turretRotatorHealth.chanceToHit;
-    turret.optics.health = t.surveyingDeviceHealth.maxHealth;
-    turret.optics.regenHealth = t.surveyingDeviceHealth.maxRegenHealth;
-    turret.optics.repairCost = t.surveyingDeviceHealth.repairCost;
-    turret.optics.chanceToHit = t.surveyingDeviceHealth.chanceToHit;
-    turret.armor.front = 0; // FIXME
-    turret.armor.side = 0; // FIXME
-    turret.armor.rear = 0; // FIXME
-    turret.yawLimits.left = ParseNums(g.turretYawLimits.c_str(), 0);
-    turret.yawLimits.right = ParseNums(g.turretYawLimits.c_str(), 1);
-    engine.health = e.maxHealth;
-    engine.regenHealth = e.maxRegenHealth;
-    engine.repairCost = e.repairCost;
-    engine.chanceToHit = .45;
-    engine.name = e.label;
-    engine.tags = e.tags;
-    engine.tier = e.level;
-    engine.price = e.price;
-    engine.weight = e.weight;
-    engine.power = e.power;
-    engine.chanceOfFire = e.fireStartingChance;
-    radio.health = r.maxHealth;
-    radio.regenHealth = r.maxRegenHealth;
-    radio.repairCost = r.repairCost;
-    radio.chanceToHit = .45;
-    radio.name = r.label;
-    radio.tags = r.tags;
-    radio.tier = r.level;
-    radio.price = r.price;
-    radio.weight = r.weight;
-    radio.signalRadius = r.distance;
-    gun.health = g.maxHealth;
-    gun.regenHealth = g.maxRegenHealth;
-    gun.repairCost = g.repairCost;
-    gun.chanceToHit = .33;
-    gun.name = g.label;
-    gun.tags = g.tags;
-    gun.tier = g.level;
-    gun.price = g.price;
-    gun.weight = g.weight;
-    gun.rotationSpeed = g.rotationSpeed;
-    gun.reloadTime = g.reloadTime;
-    gun.ammo = g.maxAmmo;
-    gun.aimTime = g.aimingTime;
-    gun.magazine.size = g.clip.count;
-    gun.magazine.burst = g.burst.count;
-    gun.magazine.delay = 60.0 / g.burst.rate;
-    gun.dispersion.base = g.shotDispersionRadius;
-    gun.dispersion.movement = g.shotDispersionFactors.turretRotation;
-    gun.dispersion.shot = g.shotDispersionFactors.afterShot;
-    gun.dispersion.damaged = g.shotDispersionFactors.whileGunDamaged;
-    gun.pitchLimits.basic.up = -ParseNums(g.pitchLimits.c_str(), 0);
-    gun.pitchLimits.basic.down = ParseNums(g.pitchLimits.c_str(), 1);
-    gun.pitchLimits.front.up = g.extraPitchLimits.front.size() ? -ParseNums(g.extraPitchLimits.front.c_str(), 0) : gun.pitchLimits.basic.up;
-    gun.pitchLimits.front.down = g.extraPitchLimits.front.size() ? ParseNums(g.extraPitchLimits.front.c_str(), 1) : gun.pitchLimits.basic.down;
-    gun.pitchLimits.back.up = g.extraPitchLimits.back.size() ? -ParseNums(g.extraPitchLimits.back.c_str(), 0) : gun.pitchLimits.basic.up;
-    gun.pitchLimits.back.down = g.extraPitchLimits.back.size() ? ParseNums(g.extraPitchLimits.back.c_str(), 1) : gun.pitchLimits.basic.down;
-    ammoBay.health = h.hull.ammoBayHealth.maxHealth;
-    ammoBay.regenHealth = h.hull.ammoBayHealth.maxRegenHealth;
-    ammoBay.repairCost = h.hull.ammoBayHealth.repairCost;
-    ammoBay.chanceToHit = h.hull.ammoBayHealth.chanceToHit;
-    fuelTank.health = f.maxHealth;
-    fuelTank.regenHealth = f.maxRegenHealth;
-    fuelTank.repairCost = f.repairCost;
-    fuelTank.chanceToHit = .45;
-    fuelTank.name = f.label;
-    fuelTank.tags = f.tags;
-    fuelTank.tier = f.maxHealth * 2 / 25 - 6;
-    fuelTank.price = f.price;
-    fuelTank.weight = f.weight;
-    stockPowerToWeight = (double)h.engines.list.begin()->power / (
-        h.hull.weight +
-        h.chassiss.list.begin()->weight +
-        h.fuelTanks.list.begin()->weight +
-        h.turrets.list.begin()->weight +
-        h.turrets.list.begin()->guns.list.begin()->weight +
-        h.engines.list.begin()->weight +
-        h.radios.list.begin()->weight);
-    for (size_t tanker = 0; tanker < 8; tanker++) {
-      crew[tanker] = 0;
-      for (size_t role = 0; role < 4; role++)
-        crew[tanker] |= h.crew.tankers[tanker].roles[role];
-    }
-    isPremium = h.premium;
-    nation = h.nation;
-  }
-};
-
-
-
-
-
-struct MeasuredShell : Shell {
-	enum Kind { HE, AP, APCR, HEAT } kind_enum;
-	MeasuredShell(
-		const Shell& shell,
-		double key = 0.0,
-		const Tank* tank = 0,
-		const Turret* turret = 0,
-		const Gun* gun = 0) : Shell(shell), key(key), tank(tank), turret(turret), gun(gun) {
-		if (kind == "HIGH_EXPLOSIVE") {
-			kind_enum = HE;
-			tier = pow(pow(getTier(damage.armor * 0.175), 2.5) + pow(getTier(piercingPower_at_100), 2.5), 1.0/2.5);
-		} else if (kind == "ARMOR_PIERCING") {
-			kind_enum = AP;
-			tier = getTier(piercingPower_at_100);
-		} else if (kind == "ARMOR_PIERCING_CR") {
-			kind_enum = APCR;
-			tier = getTier(piercingPower_at_100);
-		} else if (kind == "HOLLOW_CHARGE") {
-			kind_enum = HEAT;
-			tier = getTier(piercingPower_at_100 * 0.96);
-		}
-		cost_per_damage = price / (double)damage.armor;
-	}
-
-	static double getPen(double x) {
-		return (23.0 - (3.0 - 0.47*x)*x)*x;
-	}
-
-	static double getTier(double a) {
-		auto x = 0.025*a + 1;
-		x -= (getPen(x) - a)/(23 - 6*x + 1.41*x*x);
-		x -= (getPen(x) - a)/(23 - 6*x + 1.41*x*x);
-		x -= (getPen(x) - a)/(23 - 6*x + 1.41*x*x);
-		x -= (getPen(x) - a)/(23 - 6*x + 1.41*x*x);
-		return x;
-	}
-
-	double tier;
-	double cost_per_damage;
-	double key;
-	const Tank* tank;
-	const Turret* turret;
-	const Gun* gun;
-	bool operator <(const MeasuredShell& a) const { return key < a.key || key == a.key && label < a.label; }
-	bool operator ==(const MeasuredShell& a) const { return key == a.key && label == a.label; }
-};
-
-//static double getTier(double a) {
-//	auto x = 0.025*a + 1;
-//	x -= (getPen(x) - a)/(23 - 6*x + 1.41*x*x);
-//	x -= (getPen(x) - a)/(23 - 6*x + 1.41*x*x);
-//	x -= (getPen(x) - a)/(23 - 6*x + 1.41*x*x);
-//	x -= (getPen(x) - a)/(23 - 6*x + 1.41*x*x);
-//	return x;
-//}
-
-struct MeasuredGun : Gun {
-	MeasuredGun(
-		const Gun& gun,
-		const Tank* tank,
-		const Turret* turret,
-		double key = 0) : Gun(gun), key(key), tank(tank), turret(turret) {
-		double armor_tier = tank->level;
-	}
-
-	static double getPen(double x) {
-		x = min(max(x, .5), 10);
-		return (23.0 - (3.0 - 0.47*x)*x)*x;
-	}
-
-	static double getHP(double x) {
-		x = min(max(x, .8), 10);
-		return (80.0 - (4.0 - 2.0*x)*x)*x;
-	}
-
-	static double getEffectiveDamage(double hp_tier, double armor_tier, const Shell* shell, double range = 100) {
-		double armor_thickness = getPen(armor_tier - 0.8);
-		double piercingPower = shell->piercingPower_at_100 + (shell->piercingPower_at_max - shell->piercingPower_at_100) * (max(100, min(shell->maxDistance, range)) - 100) / (shell->maxDistance - 100);
-		double x = 1 / (1 + exp(10*(armor_thickness - piercingPower) / piercingPower));
-		double damage = x * min((double)shell->damage.armor, getHP(hp_tier) * 0.8);
-		if (shell->kind  == "HIGH_EXPLOSIVE")
-			damage += (1 - x) * min(getHP(hp_tier) * 0.8, max(0.0, shell->damage.armor * 0.5 - 1.1 * armor_thickness));
-		return damage;
-	}
-
-	static double getEffectiveDamage(double hp_tier, double armor_tier, const vector<Shell>& list, double range = 100) {
-		double damage = 0;
-		double ddpcr = 0;
-		for (auto i = list.begin(), e = list.end(); i != e; ++i) {
-			double temp = getEffectiveDamage(hp_tier, armor_tier, &*i, range);
-			double costRatio = temp * temp / i->price;
-			damage += temp * costRatio * costRatio;
-			ddpcr += costRatio * costRatio;
-		}
-		return damage / ddpcr;
-	}
-
-	double getEffectiveDamage(double range = 100, double time = 0, double armor_tier_delta = 0) {
-		struct { double p, hp_tier, armor_tier; } target[] = {
-			{ 0.05, tank->level * 0.5, tank->level + armor_tier_delta - 8 }, // arty
-			{ 0.06, tank->level - 2, tank->level + armor_tier_delta - 4 }, // scouts
-			{ 0.09, tank->level - 2, tank->level + armor_tier_delta - 2 },
-			{ 0.20, tank->level - 1, tank->level + armor_tier_delta - 1 },
-			{ 0.30, tank->level    , tank->level + armor_tier_delta     },
-			{ 0.20, tank->level + 1, tank->level + armor_tier_delta + 1 },
-			{ 0.10, tank->level + 2, tank->level + armor_tier_delta + 2 },
-		};
-		if (tank->level == 1) {
-			target[0].p = target[1].p = target[2].p = target[3].p = target[6].p = 0;
-			target[4].p = .75;
-			target[5].p = .25;
-		} else if (tank->level == 2) {
-			target[1].p = target[2].p = target[6].p = 0;
-			target[3].p = .20;
-			target[4].p = .5;
-			target[5].p = .25;
-		} else if (tank->level == 3) {
-			target[1].p = target[2].p = 0;
-			target[5].p = .25;
-			target[6].p = .15;
-		} else if (tank->level == 4) {
-			target[1].p = target[2].p = 0;
-			target[4].p = .35;
-			target[5].p = .25;
-		}
-
-		double effDamage = 0; 
-		for (size_t i = 0; i < 7; i++)
-			effDamage += target[i].p * getEffectiveDamage(target[i].hp_tier, target[i].armor_tier, shots.list, range);
-		if (!time)
-			return effDamage;
-		double damage = 0;
-		if (clip.count)
-			for (int burst = 0; burst < 10; burst++)
-				for (int i = 0; i < clip.count; i++)
-					damage += effDamage / (1 + exp((6.0 / time) * (i * 60.0 / clip.rate + burst * reloadTime - time)));
-		else
-			for (int i = 0; i < 100; i++)
-				damage += effDamage / (1 + exp(i * reloadTime - time));
-		return damage;
-	}
-
-	double getEffReloadTime() {
-		return clip.count
-			? ((clip.count - 1) * (60.0 / clip.rate) + reloadTime) / clip.count
-			: reloadTime;
-	}
-
-	double getEffectiveDPM(double range = 100, double armor_tier_delta = 0) {
-		return getEffectiveDamage(range, 0.0, armor_tier_delta) * 60.0 / getEffReloadTime();
-	}
-
-	double getIdealTimeAtAngle(double angle) {
-		//return 
-	}
-
-	double key;
-	const Tank* tank;
-	const Turret* turret;
-	bool operator <(const MeasuredGun& a) const { return key < a.key || key == a.key && label < a.label; }
-	bool operator ==(const MeasuredGun& a) const { return key == a.key && label == a.label; }
-};
-
-double shotsTier(const vector<Shell>& shots) {
-	double total = 0;
-	double size = 0;
-	for (auto i = shots.begin(), e = shots.end(); i != e; ++i) {
-		if (i->isPremium)
+	for (auto i = tanksList.list.begin(), e = tanksList.list.end(); i != e; ++i) {
+		if (i->nation != current_nation)
 			continue;
-		total += pow(MeasuredShell(*i).tier, 2.0);
-		size += 1.0f;
+		FileView tankFile((path + i->label + ".xml").c_str());
+		if (tankFile.err) {
+			fprintf(stderr, "File open error: %s\n", tankFile.err);
+			continue;
+		}
+		ReadHeader(tankFile.data);
+		tag = i->label.c_str();
+		//printf("%s\n", i->label.c_str());
+		Case(*i);
 	}
-	return pow(total * (1.0 / pow(size, 0.25)), 1.0/2.0);
 }
 
+void TankInit(Tank& o, const TankElement& h, const TurretElement& t, const GunElement& g) {
+	const FuelTankElement& f = h.fuelTanks.list.back();
+	const ChassisElement& c = h.chassiss.list.back();
+	const EngineElement& e = h.engines.list.back();
+	const RadioElement& r = h.radios.list.back();
+	o.hull.health = h.hull.maxHealth;
+	o.hull.regenHealth = 0;
+	o.hull.repairCost = h.repairCost;
+	o.hull.chanceToHit = 1;
+	o.hull.name = h.label;
+	o.hull.tags = h.tags;
+	o.hull.tier = h.level;
+	o.hull.price = h.price;
+	o.hull.weight = h.hull.weight;
+	o.hull.armor.front = 0; // FIXME
+	o.hull.armor.side = 0; // FIXME
+	o.hull.armor.back = 0; // FIXME
+	o.chassis.health = c.maxHealth;
+	o.chassis.regenHealth = c.maxRegenHealth;
+	o.chassis.repairCost = c.repairCost;
+	o.chassis.chanceToHit = 1;
+	o.chassis.name = c.label;
+	o.chassis.tags = c.tags;
+	o.chassis.tier = c.level;
+	o.chassis.price = c.price;
+	o.chassis.weight = c.weight;
+	o.chassis.armor.left = c.armor.leftTrack;
+	o.chassis.armor.right = c.armor.rightTrack;
+	o.chassis.maxLoad = c.maxLoad;
+	o.chassis.movementDispersion = c.shotDispersionFactors.vehicleMovement;
+	o.chassis.terrainResistance.hard = ParseNums(c.terrainResistance.c_str(), 0);
+	o.chassis.terrainResistance.medium = ParseNums(c.terrainResistance.c_str(), 1);
+	o.chassis.terrainResistance.soft = ParseNums(c.terrainResistance.c_str(), 2);
+	o.chassis.speedLimits.forward = h.speedLimits.forward;
+	o.chassis.speedLimits.backward = h.speedLimits.backward;
+	o.chassis.rotation.speed = c.rotationSpeed;
+	o.chassis.rotation.dispersion = c.shotDispersionFactors.vehicleRotation;
+	o.chassis.rotation.isCentered = c.rotationIsAroundCenter;
+	o.turret.health = t.maxHealth;
+	o.turret.regenHealth = 0;
+	o.turret.repairCost = t.repairCost;
+	o.turret.chanceToHit = 1;
+	o.turret.name = t.label;
+	o.turret.tags = t.tags;
+	o.turret.tier = t.level;
+	o.turret.price = t.price;
+	o.turret.weight = t.weight;
+	o.turret.rotationSpeed = t.rotationSpeed;
+	o.turret.visionRadius = t.circularVisionRadius;
+	o.turret.rotator.health = t.turretRotatorHealth.maxHealth;
+	o.turret.rotator.regenHealth = t.turretRotatorHealth.maxRegenHealth;
+	o.turret.rotator.repairCost = t.turretRotatorHealth.repairCost;
+	o.turret.rotator.chanceToHit = t.turretRotatorHealth.chanceToHit;
+	o.turret.optics.health = t.surveyingDeviceHealth.maxHealth;
+	o.turret.optics.regenHealth = t.surveyingDeviceHealth.maxRegenHealth;
+	o.turret.optics.repairCost = t.surveyingDeviceHealth.repairCost;
+	o.turret.optics.chanceToHit = t.surveyingDeviceHealth.chanceToHit;
+	o.turret.armor.front = 0; // FIXME
+	o.turret.armor.side = 0; // FIXME
+	o.turret.armor.rear = 0; // FIXME
+	o.turret.yawLimits.left = ParseNums(g.turretYawLimits.c_str(), 0);
+	o.turret.yawLimits.right = ParseNums(g.turretYawLimits.c_str(), 1);
+	o.engine.health = e.maxHealth;
+	o.engine.regenHealth = e.maxRegenHealth;
+	o.engine.repairCost = e.repairCost;
+	o.engine.chanceToHit = .45;
+	o.engine.name = e.label;
+	o.engine.tags = e.tags;
+	o.engine.tier = e.level;
+	o.engine.price = e.price;
+	o.engine.weight = e.weight;
+	o.engine.power = e.power;
+	o.engine.chanceOfFire = e.fireStartingChance;
+	o.radio.health = r.maxHealth;
+	o.radio.regenHealth = r.maxRegenHealth;
+	o.radio.repairCost = r.repairCost;
+	o.radio.chanceToHit = .45;
+	o.radio.name = r.label;
+	o.radio.tags = r.tags;
+	o.radio.tier = r.level;
+	o.radio.price = r.price;
+	o.radio.weight = r.weight;
+	o.radio.signalRadius = r.distance;
+	o.gun.health = g.maxHealth;
+	o.gun.regenHealth = g.maxRegenHealth;
+	o.gun.repairCost = g.repairCost;
+	o.gun.chanceToHit = .33;
+	o.gun.name = g.label;
+	o.gun.tags = g.tags;
+	o.gun.tier = g.level;
+	o.gun.price = g.price;
+	o.gun.weight = g.weight;
+	o.gun.rotationSpeed = g.rotationSpeed;
+	o.gun.reloadTime = g.reloadTime;
+	o.gun.ammo = g.maxAmmo;
+	o.gun.aimTime = g.aimingTime;
+	o.gun.magazine.size = g.clip.count ? g.clip.count : 1;
+	o.gun.magazine.burst = g.burst.count ? g.burst.count : 1;
+	o.gun.magazine.delay = g.burst.rate ? 60.0 / g.burst.rate : 0;
+	o.gun.dispersion.base = g.shotDispersionRadius;
+	o.gun.dispersion.movement = g.shotDispersionFactors.turretRotation;
+	o.gun.dispersion.shot = g.shotDispersionFactors.afterShot;
+	o.gun.dispersion.damaged = g.shotDispersionFactors.whileGunDamaged;
+	o.gun.pitchLimits.basic.up = -ParseNums(g.pitchLimits.c_str(), 0);
+	o.gun.pitchLimits.basic.down = ParseNums(g.pitchLimits.c_str(), 1);
+	o.gun.pitchLimits.front.up = g.extraPitchLimits.front.size() ? -ParseNums(g.extraPitchLimits.front.c_str(), 0) : o.gun.pitchLimits.basic.up;
+	o.gun.pitchLimits.front.down = g.extraPitchLimits.front.size() ? ParseNums(g.extraPitchLimits.front.c_str(), 1) : o.gun.pitchLimits.basic.down;
+	o.gun.pitchLimits.back.up = g.extraPitchLimits.back.size() ? -ParseNums(g.extraPitchLimits.back.c_str(), 0) : o.gun.pitchLimits.basic.up;
+	o.gun.pitchLimits.back.down = g.extraPitchLimits.back.size() ? ParseNums(g.extraPitchLimits.back.c_str(), 1) : o.gun.pitchLimits.basic.down;
+	o.ammoBay.health = h.hull.ammoBayHealth.maxHealth;
+	o.ammoBay.regenHealth = h.hull.ammoBayHealth.maxRegenHealth;
+	o.ammoBay.repairCost = h.hull.ammoBayHealth.repairCost;
+	o.ammoBay.chanceToHit = h.hull.ammoBayHealth.chanceToHit;
+	o.fuelTank.health = f.maxHealth;
+	o.fuelTank.regenHealth = f.maxRegenHealth;
+	o.fuelTank.repairCost = f.repairCost;
+	o.fuelTank.chanceToHit = .45;
+	o.fuelTank.name = f.label;
+	o.fuelTank.tags = f.tags;
+	o.fuelTank.tier = f.maxHealth * 2 / 25 - 6;
+	o.fuelTank.price = f.price;
+	o.fuelTank.weight = f.weight;
+	for (size_t i = 0; i < 3; i++)
+		o.shells[i].kind = Shell::UNUSED_SLOT_SHELL;
+	for (size_t i = 0, end = g.shots.list.size(); i < end; i++) {
+		const ShellElement& e = g.shots.list[i];
+		if (e.kind == "ARMOR_PIERCING") o.shells[i].kind = Shell::AP;
+		if (e.kind == "ARMOR_PIERCING_CR") o.shells[i].kind = Shell::APCR;
+		if (e.kind == "HOLLOW_CHARGE") o.shells[i].kind = Shell::HEAT;
+		if (e.kind == "HIGH_EXPLOSIVE") o.shells[i].kind = Shell::HE;
+		o.shells[i].name = e.label;
+		o.shells[i].price = e.price;
+		o.shells[i].caliber = e.caliber;
+		o.shells[i].explosionRadius = e.explosionRadius;
+		o.shells[i].damage = e.damage.armor;
+		o.shells[i].moduleDamage = e.damage.devices;
+		o.shells[i].speed = e.speed;
+		o.shells[i].gravity = e.gravity;
+		o.shells[i].maxRange = e.maxDistance;
+		o.shells[i].penAt100m = e.piercingPower_at_100;
+		o.shells[i].penAt720m = e.piercingPower_at_max;
+		o.shells[i].isPremium = e.isPremium;
+	}
+	o.stockPowerToWeight = (double)h.engines.list.begin()->power / (
+		h.hull.weight +
+		h.chassiss.list.begin()->weight +
+		h.fuelTanks.list.begin()->weight +
+		h.turrets.list.begin()->weight +
+		h.turrets.list.begin()->guns.list.begin()->weight +
+		h.engines.list.begin()->weight +
+		h.radios.list.begin()->weight);
+	for (size_t i = 0; i < 8; i++)
+		o.crew[i] = 0;
+	for (size_t i = 0; i < h.crew.tankers.size(); i++)
+		o.crew[i] = h.crew.tankers[i];
+	o.isPremium = h.premium;
+	o.nation = h.nation;
+}
+} // namespace
 
-
-
-
-
-
-
-
+extern void ProcessTanks(const Tank* tanks, size_t size);
 
 int main(int argc, char* argv[]) {
 	string path = "C:\\Games\\World_of_Tanks\\res\\scripts\\item_defs\\vehicles\\";
@@ -1418,323 +1188,70 @@ int main(int argc, char* argv[]) {
 			path = string(begin - 1, end) + "res\\scripts\\item_defs\\vehicles\\";
 	}
 	static const char* const nations[] = { "china", "france", "germany", "japan", "uk", "usa", "ussr" };
-	for (nation = CHINA; nation <= USSR; nation = (Nation)(nation + 1)) {
-		//printf("%s\n", nations[nation]);
-		ReadNation((path + nations[nation] + "\\").c_str());
-		//break;
-	}
+	for (current_nation = CHINA; current_nation <= USSR; current_nation = (Nation)(current_nation + 1))
+		ReadNation((path + nations[current_nation] + "\\").c_str());
 
-#if 0
-
-
-
-#if defined(GROVER)
-{
-const char * fmtH = "%45s  |  %20s %10s %10s %10s %10s %10s %10s %10s %10
- const char * fmtR = "%45s  |  %20s %10d %10d %10.1f %10.1f %10d %10d %10d
- printf(fmtH, "Shell", "Kind", "Price", "Premium", "ExpRadius", "PierceFal
- for (auto i = shellsList.list.begin(), e = shellsList.list.end(); i != e;
-printf(fmtR
- , i->second.userString.c_str()
- , i->second.kind.c_str()
- , i->second.price
- , (int)i->second.isPremium
- , (float)i->second.explosionRadius
- , (float)i->second.piercingPowerLossFactorByDistance
- , i->second.damage.armor
- , i->second.speed
- , i->second.maxDistance
- , (float)i->second.piercingPower_at_100
- , (float)i->second.piercingPower_at_max
- );
-}
-
-}
-printf("\n");
-{
-const char * fmtH = "%45s  |  %10s   %10s   %10s   %10s   %10s   %10s   %
- const char * fmtR = "%45s  |  %10.1f %10.1f %10.1f %10.1f %10.1f %10.1f %
- printf(fmtH, "Gun", "Impulse", "Recoil.amplitude", "Recoil.backoffTime",
-for (auto k = gunsList.list.begin(), g = gunsList.list.end(); k != g; ++k
- printf(fmtR
- , k->second.label.c_str()
- , k->second.impulse
- , k->second.recoil.amplitude
- , k->second.recoil.backoffTime
- , k->second.recoil.returnTime
- , k->second.rotationSpeed
- , k->second.reloadTime
- , k->second.maxAmmo
- , k->second.aimingTime
- , k->second.shotDispersionRadius
- );
-}
-printf("\n");
-{
-
-cout.precision(1);
-cout
- << setw(50) << "Tank |"
- << setw(10) << "Price"
- << setw(10) << "Premium"
- << setw(10) << "Level"
- << setw(14) << "SpeedLimits"
- << setw(12) << "RepairCost"
- << setw(25) << "Hull.Armor.primaryArmor"
- << setw(10) << "Hull.Weight"
- << setw(16) << "Hull.MaxHealth"
- << std::endl;
-
-for (auto k = tanksList.list.begin(); k != tanksList.list.end(); ++k)
- cout
- << setw(50) << k->userString
- << setw(10) << k->price
- << setw(10) << k->premium
- << setw(10) << k->level
- << setw(14) << k->speedLimits.forward
- << setw(12) << k->repairCost
- << setw(25) << k->hull.primaryArmor
- << setw(10) << k->hull.weight
- << setw(16) << k->hull.maxHealth
- << std::endl;
-}
-#endif
-
-
-
-
-
-#if 0
- struct ShellTest {
-double key;
-Shell* value;
-ShellTest(double key, Shell* value) : key(key), value(value) {}
-bool operator <(const ShellTest& x) { return key > x.key; }
-
-};
-vector<ShellTest> shellTest;
-for (auto i = shellsList.list.begin(), e = shellsList.list.end(); i != e
- if (!i->second.notInShop && i->second.premium && i->second.kind
- shellTest.push_back(ShellTest(i->second.damage.armor / (
-}
-std::sort(shellTest.begin(), shellTest.end());
-for (int i = 0; i < 80 && i < shellTest.size(); i++)
- printf("%28s : %-17s : %-10g : %-4d : %-4d\n", shellTest[i].valu
- #endif
-
-#if 0
- struct ShellTest {
-double key;
-Shell* value;
-ShellTest(double key, Shell* value) : key(key), value(value) {}
-bool operator <(const ShellTest& x) { return key > x.key; }
-
-  };
-vector<ShellTest> shellTest;
-for (auto i = tanksList.list.begin(), e = tanksList.list.end(); i != e;
-for (auto j = i->turrets.list.begin(), f = i->turrets.list.end()
- for (auto k = j->guns.list.begin(), g = j->guns.list.end
- for (auto l = k->shots.list.begin(), h = k->shot
- if (!l->notInShop && l->kind == "HIGH_EX
-                                               //printf("%d : %g\n", l->damage.
-shellTest.push_back(ShellTest(l -
-}
-std::sort(shellTest.begin(), shellTest.end());
-for (int i = 0; i < 250 && i < shellTest.size(); i++)
- printf("%28s : %-17s : %-10g\n", shellTest[i].value->label.c_str
- #endif
-
-#if 0
- struct ShellTest {
-double key;
-Shell* value;
-Tank* tank;
-ShellTest(double key, Shell* value, Tank* tank) : key(key), valu
- bool operator <(const ShellTest& x) { return key < x.key; }
-
-    };
-vector<ShellTest> shellTest;
-for (auto i = tanksList.list.begin(), e = tanksList.list.end(); i != e;
-for (auto k = i->turrets.list.back().guns.list.begin(), g = i->t
- for (auto l = k->shots.list.begin(), h = k->shots.list.e
- if (i->notInShop)
- continue;
-if (l->kind == "HIGH_EXPLOSIVE")
- shellTest.push_back(ShellTest(HETier(ato
- else if (l->kind == "ARMOR_PIERCING")
- shellTest.push_back(ShellTest(APTier(ato
- else if (l->kind == "ARMOR_PIERCING_CR")
- shellTest.push_back(ShellTest(APTier(ato
- else if (l->kind == "HOLLOW_CHARGE")
- shellTest.push_back(ShellTest(APTier(ato
- else
- printf("%s\n", l->kind.c_str());
-}
-std::sort(shellTest.begin(), shellTest.end());
-int printed = 0;
-for (int i = 0; i < shellTest.size(); i++) {
-if (i != 0 && shellTest[i].value->label == shellTest[i - 1].value -
-continue;
-if (printed++ % 5 && shellTest[i].value->label.find("HESH") == s
- continue;
-printf("%20s : %-17s : %-10g\n", shellTest[i].value->label.c_str
-               //printf("%20s : %-17s : %-17s : %-10g\n", shellTest[i].value->l
-
-    }
-#endif
-
-#if defined(BASIC_SHELL_TEST) || 0
- struct ShellTest {
-double key;
-Shell* value;
-Tank* tank;
-ShellTest(double key, Shell* value, Tank* tank) : key(key), valu
- bool operator <(const ShellTest& x) {
-            return key > x.key || key
-
-        };
-vector<ShellTest> shellTest;
-for (auto i = tanksList.list.begin(), e = tanksList.list.end(); i != e;
-if (!i->notInShop)
- for (auto k = i->turrets.list.back().guns.list.begin(), g = i->t
- for (auto l = k->shots.list.begin(), h = k->shots.list.e
- if (!l->isPremium)
- continue;
-                               //auto t = l->speed * sqrt(0.5) / l->gravity;
-                               //auto x = l->speed * sqrt(0.5) * t;
-                               //auto x = l->speed * l->speed / l->gravity;
-                               //printf("%d %g\n", l->maxDistance, x);
-auto x = MeasuredShell(*l).cost_per_damage;
-if (x == 0)
- continue;
-shellTest.push_back(ShellTest(x, &*l, &*i));
-
-    }
-std::sort(shellTest.begin(), shellTest.end());
-int printed = 0;
-for (int i = 0; i < shellTest.size(); i++) {
-if (i != 0 && shellTest[i].value->label == shellTest[i - 1].value -
-continue;
-               //if (printed++ % 5 && shellTest[i].value->label.find("HESH") ==
-               //      continue;
-               //printf("%20s : %-17s : %-10g\n", shellTest[i].value->label.c_s
-printf("%20s : %-17s : %-17s : %-10g\n", shellTest[i].value->lab
-
-    }
-#endif
-
-#if 0
- struct TankTest {
-double key;
-Gun* value;
-Tank* tank;
-TankTest(double key, Gun* value, Tank* tank) : key(key), value(v
- bool operator <(const TankTest& x) { return key > x.key; }
-
-    };
-vector<TankTest> tankTest;
-for (auto i = tanksList.list.begin(), e = tanksList.list.end(); i != e;
-for (auto k = i->turrets.list.back().guns.list.begin(), g = i->t
- if (i->notInShop)
- continue;
-tankTest.push_back(TankTest(shotsTier(k->shots.l
- }
-std::sort(tankTest.begin(), tankTest.end());
-int printed = 0;
-for (int i = 0; i < tankTest.size() && i < 400; i++) {
-if (i != 0 && tankTest[i].value->label == tankTest[i - 1].value->l
- continue;
-               //if (printed++ % 3)
-               //      continue;
-printf("%20s : %20s : %-10g\n", tankTest[i].tank->label.c_str(),
-               //printf("%20s : %-17s : %-17s : %-10g\n", shellTest[i].value->l
-
-      }
-#endif
-
-#if 1
- struct GunTest {
-double key;
-Gun* value;
-Tank* tank;
-GunTest(double key, Gun* value, Tank* tank) : key(key), value(va
- bool operator <(const GunTest& x) { return key > x.key; }
-
-      };
-vector<GunTest> gunTest;
-for (auto i = tanksList.list.begin(), e = tanksList.list.end(); i != e;
-for (auto j = i->turrets.list.begin(), f = i->turrets.list.end()
- for (auto k = j->guns.list.begin(), g = j->guns.list.end
- if (!i->notInShop && !k->burst.count) {
-double r = k->clip.count ? 60.0 / k->cli
- double t = k->shotDispersionFactors.afte
- t = log(sqrt(1.0 + t*t)) * k->aimingTime
- if (t > r)
- gunTest.push_back(GunTest(t / r,
-
-      }
-std::sort(gunTest.begin(), gunTest.end());
-for (int i = 0; i < 200 && i < gunTest.size(); i++) {
-auto& gun = *gunTest[i].value;
-printf("%23s : %d : %3g : %-23s : %-6g : %-4g\n", gun.label.c_st
-
-      }
-#endif
-
-       //for (auto i = tanksList.list.begin(), e = tanksList.list.end(); i != e
-       //      if (!i->notInShop && i->label.find("T-") != string::npos)
-       //              for (auto j = i->turrets.list.begin(), f = i->turrets.li
-       //                      for (auto k = j->guns.list.begin(), g = j->guns.
-       //                              printf("%20s : %-20s\n", k->label.c_str(
-       //                              MeasuredGun::EffectiveDamage(i->level, k
-       //                      }
-       //_getch();
-       //return 0;
-
-#if 0
-   //defined(GUN_QUALITY_TEST) || 1
-vector<MeasuredGun> gunTest;
-for (auto i = tanksList.list.begin(), e = tanksList.list.end(); i != e;
-if (!i->notInShop)// && i->label.find("GB32") != string::npos)
- for (auto j = i->turrets.list.begin(), f = i->turrets.list.end()
- for (auto k = j->guns.list.begin(), g = j->guns.list.end
- MeasuredGun a(*k, &*i, &*j);
-gunTest.push_back(MeasuredGun(*k, &*i, &*j, -a.g
- }
-std::sort(gunTest.begin(), gunTest.end());
-for (int i = 0; i < 250 && i < gunTest.size(); i++) {
-if (i && gunTest[i] == gunTest[i - 1])
- continue;
-auto& gun = gunTest[i];
-printf("%20s : %-20s : %-5g\n", gun.label.c_str(), gun.tank->lab
-               //printf("%20s : %-20s : %-2d - %-2d : %-5g\n", gun.label.c_str(
-
-        }
-#endif
-
-       //for (auto i = gunsList.list.begin(), e = gunsList.list.end(); i != e;
-
-#if 0
- for (auto i = tanksList.list.begin(), e = tanksList.list.end(); i != e;
-if (i->turrets.list.size() == 0)
- printf("%s\n", i->label.c_str());
-else {
-printf("%s : %g\n", i->label.c_str(), i->turrets.list[0]
-                       //Tank::Turret& t = i->turrets.list[0];
-                       //printf("%s\n", i->turrets.list[0].label.c_str());
-                       //printf("%s : %f\n", i->turrets.list[0].maxHealth);
-
-        }
-               //fprintf(stdout, "%s %d\n", i->label.c_str(), i->radios.list.si
-
-       //auto f = fopen("out.csv", "rb");
-       //for (auto i = tanksList.list.begin(), e = tanksList.list.end(); i != e
-               //printf("%s\n", i->label ? i->label : "???");
-               //fprintf(stdout, "%s %d\n", i->label, 0);//i->turrets.list[0].g
-       //}
-#endif
-#endif
-
-
+	vector<Tank> tanks;
+	for (auto h = tanksList.list.begin(), he = tanksList.list.end(); h != he; ++h)
+		for (auto t = h->turrets.list.begin(), te = h->turrets.list.end(); t != te; ++t)
+			for (auto g = t->guns.list.begin(), ge = t->guns.list.end(); g != ge; ++g) {
+				if (h->notInShop)
+					continue;
+  //166.413 : T23
+  //185.503 : PzIV
+  //211.091 : VK7201
+  // 283.49 : T44_122
+  // 310.76 : M6A2E1
+  //320.609 : Ch03_WZ-111
+  //326.517 : Ch01_Type59
+  //326.517 : Ch01_Type59_Gold
+  //328.508 : KV-5
+  //351.102 : M60
+  //  362.9 : T95_E6
+  //363.347 : PzVIB_Tiger_II_training
+  //378.863 : Ch04_T34_1_training
+  //378.869 : PzV_training
+  //441.858 : Object_907
+  //496.035 : _105_leFH18B2
+  //498.772 : T44_85
+  //503.176 : PzIII_training
+  //510.081 : T7_Combat_Car
+  //528.729 : GB76_Mk_VIC
+  //552.629 : Ch02_Type62
+  //575.735 : PzII_J
+  //583.264 : Sexton_I
+  // 586.43 : G100_Gtraktor_Krupp
+  //604.599 : A-32
+  //619.817 : M4A3E8_Sherman_training
+  // 648.42 : T_50_2
+  // 648.42 : T_50_2
+  //656.403 : T-34-85_training
+  //657.113 : M3_Stuart_LL
+  //674.785 : KV
+  //674.785 : KV
+  //713.262 : Observer
+  //770.143 : T23E3
+  //807.787 : KV-220
+  //807.787 : KV-220_action
+  //808.609 : LTP
+  //834.857 : Ke_Ni_B
+  //835.935 : B-1bis_captured
+  // 849.04 : BT-SV
+  //850.318 : M4A2E4
+  //869.252 : PzV_PzIV
+  //869.252 : PzV_PzIV_ausf_Alfa
+  //896.037 : PzIV_Hydro
+  // 919.77 : MTLS-1G14
+  //932.436 : H39_captured
+  //951.818 : SU_85I
+  //957.566 : T1_E6
+  //962.013 : Tetrarch_LL
+  //1068.09 : SU76I
+  //   2340 : Karl
+				tanks.push_back(Tank());
+				TankInit(tanks.back(), *h, *t, *g);
+			}
+	ProcessTanks(tanks.data(), tanks.size());
 	_getch();
 }
+
