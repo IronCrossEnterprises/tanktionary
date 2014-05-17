@@ -1075,7 +1075,7 @@ void TankInit(Tank& o, const TankElement& h, const TurretElement& t, const GunEl
 	o.turret.armor.front = 0; // FIXME
 	o.turret.armor.side = 0; // FIXME
 	o.turret.armor.rear = 0; // FIXME
-	o.turret.yawLimits.left = ParseNums(g.turretYawLimits.c_str(), 0);
+	o.turret.yawLimits.left = -ParseNums(g.turretYawLimits.c_str(), 0);
 	o.turret.yawLimits.right = ParseNums(g.turretYawLimits.c_str(), 1);
 	o.engine.health = e.maxHealth;
 	o.engine.regenHealth = e.maxRegenHealth;
@@ -1193,8 +1193,9 @@ int main(int argc, char* argv[]) {
 
 	vector<Tank> tanks;
 	for (auto h = tanksList.list.begin(), he = tanksList.list.end(); h != he; ++h)
-		for (auto t = h->turrets.list.begin(), te = h->turrets.list.end(); t != te; ++t)
-			for (auto g = t->guns.list.begin(), ge = t->guns.list.end(); g != ge; ++g) {
+		//for (auto t = h->turrets.list.begin(), te = h->turrets.list.end(); t != te; ++t)
+			//for (auto g = t->guns.list.begin(), ge = t->guns.list.end(); g != ge; ++g) {
+			for (auto g = h->turrets.list.back().guns.list.begin(), ge = h->turrets.list.back().guns.list.end(); g != ge; ++g) {
 				if (h->notInShop)
 					continue;
   //166.413 : T23
@@ -1249,7 +1250,8 @@ int main(int argc, char* argv[]) {
   //1068.09 : SU76I
   //   2340 : Karl
 				tanks.push_back(Tank());
-				TankInit(tanks.back(), *h, *t, *g);
+				//TankInit(tanks.back(), *h, *t, *g);
+				TankInit(tanks.back(), *h, h->turrets.list.back(), *g);
 			}
 	ProcessTanks(tanks.data(), tanks.size());
 	_getch();

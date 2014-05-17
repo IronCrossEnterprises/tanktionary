@@ -1,12 +1,14 @@
 #include "tank.h"
 #include <math.h>
 #include <algorithm>
+#include <map>
 #include <vector>
 #include <conio.h>
 
 using std::min;
 using std::max;
 using std::string;
+using std::map;
 using std::vector;
 
 namespace {
@@ -35,50 +37,55 @@ double getPenetration(const Shell& shell, double range) {
 }
 
 struct Target {
-	double probability, range, time, hp, armorThickness;
+	double probability, range, time, angle, hp, armorThickness;
 };
 
 struct XTank : Tank {
 	XTank(const Tank& tank, Target target);
 	struct XShell : Shell {
 		XShell() {}
-		XShell(const Shell& shell, Target target);
+		XShell(const Shell& shell, Target target, const Tank& tank);
 		double getEffectiveDamage(const Shell& shell, Target target);
-		double effPenetration, effDamage, utility;
 		XShell& operator +=(const XShell& x);
 		XShell& operator *=(double x);
+		double effPenetration, effDamage, utility, accuracy;
 	} xshells[3];
 	struct XGun : Gun {
 		XGun() {}
 		XGun(const Gun& gun, Target target);
-		double effReloadTime, effShots;
 		XGun& operator +=(const XGun& x);
 		XGun& operator *=(double x);
+		double effReloadTime, effShots, utility;
 	} xgun;
 	XTank& operator +=(const XTank& x);
 	XTank& operator *=(double x);
-	double effDPM, effDamage, effBurstDamage, premiumUtility;
+	double effDPM, effDamage, effBurstDamage, premiumUtility, timeAtAngle;
 };
 
-XTank::XShell::XShell(const Shell& shell, Target target) : Shell(shell) {
+XTank::XShell::XShell(const Shell& shell, Target target, const Tank& tank) : Shell(shell) {
+	accuracy = lodgistics(4 * target.range / speed - 4);
 	effPenetration = getPenetration(shell, target.range);
 	double x = lodgistics(10 * (target.armorThickness - effPenetration) / effPenetration);
-	effDamage = x * min(target.hp, shell.damage);
+	effDamage = x * accuracy * min(target.hp, shell.damage);
 	if (shell.kind  == Shell::HE)
-		effDamage += (1 - x) * min(target.hp, max(0.0, shell.damage * 0.5 - 0.7 * target.armorThickness));
-	double costRatio = effDamage * effDamage * effDamage / max(price, 5.0);
+		effDamage += (1 - x) * accuracy * min(target.hp, max(0.0, shell.damage * 0.5 - 0.7 * target.armorThickness));
+	double costRatio = effDamage * effDamage * effDamage / max(price, min(shell.damage, tank.hull.health + tank.turret.health) * tank.hull.repairCost * 0.25);
 	utility = costRatio * costRatio;
 }
 
 XTank::XShell& XTank::XShell::operator +=(const XShell& x) {
+	effPenetration += x.effPenetration;
 	effDamage += x.effDamage;
 	utility += x.utility;
+	accuracy += x.accuracy;
 	return *this;
 }
 
 XTank::XShell& XTank::XShell::operator *=(double x) {
+	effPenetration *= x;
 	effDamage *= x;
 	utility *= x;
+	accuracy *= x;
 	return *this;
 }
 
@@ -90,34 +97,50 @@ XTank::XGun::XGun(const Gun& gun, Target target) : Gun(gun) {
 			effShots += lodgistics(t - target.time);
 }
 
-XTank::XGun& XTank::XGun::operator +=(const XGun& x) { return *this; }
-XTank::XGun& XTank::XGun::operator *=(double x) { return *this; }
+XTank::XGun& XTank::XGun::operator +=(const XGun& x) {
+	utility += x.utility;
+	return *this;
+}
+
+XTank::XGun& XTank::XGun::operator *=(double x) {
+	utility *= x;
+	return *this;
+}
 
 XTank::XTank(const Tank& tank, Target target) : Tank(tank), xgun(tank.gun, target) {
 	for (auto i = 0; i < 3; i++)
 		if (shells[i].kind)
-			xshells[i] = XShell(shells[i], target);
+			xshells[i] = XShell(shells[i], target, tank);
 	double totalUtility = 0;
 	for (auto i = 0; i < 3; i++)
-		if (xshells[i].kind)
+		if (shells[i].kind)
 			totalUtility += xshells[i].utility;
 	for (auto i = 0; i < 3; i++)
-		if (xshells[i].kind)
+		if (shells[i].kind)
 			xshells[i].utility /= totalUtility;
 	effDPM = 0;
 	for (auto i = 0; i < 3; i++)
-		if (xshells[i].kind)
+		if (shells[i].kind)
 			effDPM += 60.0 * xshells[i].effDamage / xgun.effReloadTime * xshells[i].utility;
 	effDamage = 0;
 	for (auto i = 0; i < 3; i++)
-		if (xshells[i].kind)
+		if (shells[i].kind)
 			effDamage += xshells[i].effDamage * xshells[i].utility;
 	effBurstDamage = effDamage * xgun.effShots;
 	premiumUtility = 0;
 	for (auto i = 0; i < 3; i++)
-		if (xshells[i].kind && xshells[i].isPremium)
+		if (shells[i].kind && shells[i].isPremium)
 			premiumUtility += xshells[i].utility;
-	premiumUtility *= effDamage / shells[0].damage;
+	timeAtAngle = 0;
+	for (double theta = 0, guntheta = 0; theta < target.angle; timeAtAngle += 0.01) {
+		double x = exp(2 * timeAtAngle / tank.gun.aimTime) - 1;
+		double gunrotate = min(x * .5 / tank.gun.dispersion.movement, tank.gun.rotationSpeed);
+		if (2 * guntheta > turret.yawLimits.left + turret.yawLimits.right)
+			gunrotate = 0;
+		double tankrotate = (x - gunrotate * tank.gun.dispersion.movement) / tank.chassis.movementDispersion;
+		guntheta += gunrotate * 0.01;
+		theta += (gunrotate + tankrotate) * 0.01;
+	}
 }
 
 XTank& XTank::operator +=(const XTank& x) {
@@ -129,8 +152,10 @@ XTank& XTank::operator +=(const XTank& x) {
 	effDamage += x.effDamage;
 	effBurstDamage += x.effBurstDamage;
 	premiumUtility += x.premiumUtility;
+	timeAtAngle += x.timeAtAngle;
 	return *this;
 }
+
 XTank& XTank::operator *=(double x) {
 	for (int i = 0; i < 3; i++)
 		if (xshells[i].kind)
@@ -140,19 +165,20 @@ XTank& XTank::operator *=(double x) {
 	effDamage *= x;
 	effBurstDamage *= x;
 	premiumUtility *= x;
+	timeAtAngle *= x;
 	return *this;
 }
 
-XTank Evaluate(const Tank& tank, double range = 100, double time = 0) {
+XTank Evaluate(const Tank& tank, double range, double time, double angle) {
 	double flankingBonus = 0;
 	Target target[] = {
-		{ 0.05, range, time, getHP(tank.hull.tier / 2), getArmorThickness(tank.hull.tier - flankingBonus - 8) }, // arty
-		{ 0.06, range, time, getHP(tank.hull.tier - 2), getArmorThickness(tank.hull.tier - flankingBonus - 4) }, // scouts
-		{ 0.09, range, time, getHP(tank.hull.tier - 2), getArmorThickness(tank.hull.tier - flankingBonus - 2) },
-		{ 0.20, range, time, getHP(tank.hull.tier - 1), getArmorThickness(tank.hull.tier - flankingBonus - 1) },
-		{ 0.30, range, time, getHP(tank.hull.tier    ), getArmorThickness(tank.hull.tier - flankingBonus    ) },
-		{ 0.20, range, time, getHP(tank.hull.tier + 1), getArmorThickness(tank.hull.tier - flankingBonus + 1) },
-		{ 0.10, range, time, getHP(tank.hull.tier + 2), getArmorThickness(tank.hull.tier - flankingBonus + 2) },
+		{ 0.05, range, time, angle, getHP(tank.hull.tier / 2), getArmorThickness(tank.hull.tier - flankingBonus - 8) }, // arty
+		{ 0.06, range, time, angle, getHP(tank.hull.tier - 2), getArmorThickness(tank.hull.tier - flankingBonus - 4) }, // scouts
+		{ 0.09, range, time, angle, getHP(tank.hull.tier - 2), getArmorThickness(tank.hull.tier - flankingBonus - 2) },
+		{ 0.20, range, time, angle, getHP(tank.hull.tier - 1), getArmorThickness(tank.hull.tier - flankingBonus - 1) },
+		{ 0.30, range, time, angle, getHP(tank.hull.tier    ), getArmorThickness(tank.hull.tier - flankingBonus    ) },
+		{ 0.20, range, time, angle, getHP(tank.hull.tier + 1), getArmorThickness(tank.hull.tier - flankingBonus + 1) },
+		{ 0.10, range, time, angle, getHP(tank.hull.tier + 2), getArmorThickness(tank.hull.tier - flankingBonus + 2) },
 	};
 	if (tank.hull.tier == 1) {
 		target[0].probability = target[1].probability = target[2].probability = target[3].probability = target[6].probability = 0;
@@ -190,13 +216,7 @@ XTank Evaluate(const Tank& tank, double range = 100, double time = 0) {
 	}
 	return xtank;
 }
-
-} // namespace
-
-
-
-
-
+} // nameapce
 
 void PrintSkills(char tanker) {
 	if (tanker & COMMANDER) printf("commander");
@@ -219,13 +239,32 @@ void ProcessTanks(const Tank* tanks, size_t size) {
 		XTank xtank;
 		double key;
 	};
+	vector<XTank> xtanks;
+	for (size_t i = 0; i < size; i++)
+		xtanks.push_back(Evaluate(tanks[i], 100, 6, 100));
+	map<string, vector<XTank*>> groupByGun;
+	for (size_t i = 0; i < size; i++)
+		groupByGun[xtanks[i].hull.name].push_back(&xtanks[i]);
+	for (auto i = groupByGun.begin(), e = groupByGun.end(); i != e; i++) {
+		double maxUtility = 0;
+		for (auto j = 0; j < i->second.size(); j++)
+			maxUtility = max(maxUtility, pow(i->second[j]->effDPM + i->second[j]->effBurstDamage, 2));
+		for (auto j = 0; j < i->second.size(); j++) {
+			i->second[j]->xgun.utility = pow(pow(i->second[j]->effDPM + i->second[j]->effBurstDamage, 2) / maxUtility, 3);
+			i->second[j]->premiumUtility *= i->second[j]->xgun.utility;
+			for (int k = 0; k < 3; k++)
+				if (i->second[j]->xshells[k].kind)
+					i->second[j]->xshells[k].utility *= i->second[j]->xgun.utility;
+		}
+	}
 	vector<Entry> entries;
 	for (size_t i = 0; i < size; i++) {
-		XTank xtank = Evaluate(tanks[i], 100, 6);
-		Entry e = { xtank, xtank.premiumUtility };
+		Entry e = { xtanks[i], -xtanks[i].timeAtAngle };
 		entries.push_back(e);
 	}
 	std::sort(entries.begin(), entries.end());
 	for (auto i = entries.begin(), e = entries.end(); i != e; ++i)
-		printf("%10g : %-20s : %s\n", i->xtank.premiumUtility, i->xtank.hull.name.c_str(), i->xtank.gun.name.c_str());
+		//printf("%10g : %-20s : %s\n", , i->xtank.hull.name.c_str(), i->xtank.gun.name.c_str());
+		if (i->xtank.gun.name.find("_122mm") != string::npos || i->xtank.gun.name.find("_122-mm") != string::npos)
+		printf("%10g : %-20s : %s\n", i->xtank.timeAtAngle, i->xtank.hull.name.c_str(), i->xtank.gun.name.c_str());
 }
