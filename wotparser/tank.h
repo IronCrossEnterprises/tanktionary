@@ -46,7 +46,7 @@ struct Gun : Component {
 struct Shell {
   enum Kind { UNUSED_SLOT_SHELL, AP, APCR, HEAT, HE } kind;
   std::string name;
-  double price, caliber, explosionRadius, damage, moduleDamage, speed, gravity, maxRange, penAt100m, penAt720m;
+  double price, caliber, explosionRadius, damage, moduleDamage, speed, gravity, maxRange, penAt100m, penAt350m;
   bool isPremium;
 };
 

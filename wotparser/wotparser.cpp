@@ -1153,9 +1153,9 @@ void TankInit(Tank& o, const TankElement& h, const TurretElement& t, const GunEl
 		o.shells[i].moduleDamage = e.damage.devices;
 		o.shells[i].speed = e.speed;
 		o.shells[i].gravity = e.gravity;
-		o.shells[i].maxRange = e.maxDistance;
+		o.shells[i].maxRange = min((double)e.maxDistance, e.speed * e.speed / e.gravity);
 		o.shells[i].penAt100m = e.piercingPower_at_100;
-		o.shells[i].penAt720m = e.piercingPower_at_max;
+		o.shells[i].penAt350m = (e.piercingPower_at_max - e.piercingPower_at_100) / (o.shells[i].maxRange - 100) * 250 + e.piercingPower_at_100;
 		o.shells[i].isPremium = e.isPremium;
 	}
 	o.stockPowerToWeight = (double)h.engines.list.begin()->power / (
@@ -1196,62 +1196,24 @@ int main(int argc, char* argv[]) {
 		//for (auto t = h->turrets.list.begin(), te = h->turrets.list.end(); t != te; ++t)
 			//for (auto g = t->guns.list.begin(), ge = t->guns.list.end(); g != ge; ++g) {
 			for (auto g = h->turrets.list.back().guns.list.begin(), ge = h->turrets.list.back().guns.list.end(); g != ge; ++g) {
-				if (h->notInShop)
+				if (h->notInShop && (h->label.find("_training") != string::npos ||
+					h->label == "T23" ||
+					h->label == "T44_122" ||
+					h->label == "Ch03_WZ-111" ||
+					h->label == "Ch01_Type59_Gold" ||
+					h->label == "Object_907" ||
+					h->label == "T44_85" ||
+					h->label == "T_50_2" ||
+					h->label == "KV" ||
+					h->label == "Observer" ||
+					h->label == "KV-220_action" ||
+					h->label == "PzV_PzIV_ausf_Alfa" ||
+					h->label == "Karl"))
 					continue;
-  //166.413 : T23
-  //185.503 : PzIV
-  //211.091 : VK7201
-  // 283.49 : T44_122
-  // 310.76 : M6A2E1
-  //320.609 : Ch03_WZ-111
-  //326.517 : Ch01_Type59
-  //326.517 : Ch01_Type59_Gold
-  //328.508 : KV-5
-  //351.102 : M60
-  //  362.9 : T95_E6
-  //363.347 : PzVIB_Tiger_II_training
-  //378.863 : Ch04_T34_1_training
-  //378.869 : PzV_training
-  //441.858 : Object_907
-  //496.035 : _105_leFH18B2
-  //498.772 : T44_85
-  //503.176 : PzIII_training
-  //510.081 : T7_Combat_Car
-  //528.729 : GB76_Mk_VIC
-  //552.629 : Ch02_Type62
-  //575.735 : PzII_J
-  //583.264 : Sexton_I
-  // 586.43 : G100_Gtraktor_Krupp
-  //604.599 : A-32
-  //619.817 : M4A3E8_Sherman_training
-  // 648.42 : T_50_2
-  // 648.42 : T_50_2
-  //656.403 : T-34-85_training
-  //657.113 : M3_Stuart_LL
-  //674.785 : KV
-  //674.785 : KV
-  //713.262 : Observer
-  //770.143 : T23E3
-  //807.787 : KV-220
-  //807.787 : KV-220_action
-  //808.609 : LTP
-  //834.857 : Ke_Ni_B
-  //835.935 : B-1bis_captured
-  // 849.04 : BT-SV
-  //850.318 : M4A2E4
-  //869.252 : PzV_PzIV
-  //869.252 : PzV_PzIV_ausf_Alfa
-  //896.037 : PzIV_Hydro
-  // 919.77 : MTLS-1G14
-  //932.436 : H39_captured
-  //951.818 : SU_85I
-  //957.566 : T1_E6
-  //962.013 : Tetrarch_LL
-  //1068.09 : SU76I
-  //   2340 : Karl
 				tanks.push_back(Tank());
 				//TankInit(tanks.back(), *h, *t, *g);
 				TankInit(tanks.back(), *h, h->turrets.list.back(), *g);
+				//TankInit(tanks.back(), *h, h->turrets.list.back(), *h->turrets.list.back().guns.list.begin());
 			}
 	ProcessTanks(tanks.data(), tanks.size());
 	_getch();
