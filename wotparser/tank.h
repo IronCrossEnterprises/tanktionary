@@ -64,4 +64,6 @@ struct Tank {
   char crew[8];
   bool isPremium;
   Nation nation;
+  std::string equipment;
+  std::string notes;
 };

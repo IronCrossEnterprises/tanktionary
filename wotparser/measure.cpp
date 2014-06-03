@@ -6,13 +6,11 @@
 #include <conio.h>
 #include <functional>
 
-using std::min;
-using std::max;
 using std::string;
 using std::map;
 using std::vector;
 
-
+#if 0
 double averageHealth[10][5] = {
 {113.333,     140,       0,       0,       0},
 {162.368, 183.333,       0,     122,      80},
@@ -38,28 +36,28 @@ int frequency[10][5] = {
 { 0, 10,  8,  8,  5},
 { 0, 12, 10,  8,  5},
 };
-
-struct Target {
-	double probability, range, time, angle, hp, armorThickness;
-};
+#endif
 
 double lodgistics(double x) {
 	return 1 / (1 + exp(x));
 }
 
-double computeGunHandling(const Tank& tank, double angle = 100) {
+double getGunHandling(Tank& tank, double speed, double angle) {
 	const Turret& turret = tank.turret;
+	const Gun& gun = tank.gun;
+	const Chassis& chassis = tank.chassis;
 	double timeAtAngle = 0;
 	for (double theta = 0, guntheta = 0; theta < angle; timeAtAngle += 0.01) {
-		double x = exp(2 * timeAtAngle / tank.gun.aimTime) - 1;
-		double gunrotate = min(x * .5 / tank.gun.dispersion.movement, tank.gun.rotationSpeed);
-		if (2 * guntheta > turret.yawLimits.left + turret.yawLimits.right)
+		double x = exp(2 * timeAtAngle / gun.aimTime) - 1;
+		double gunrotate = std::min(x * .5 / gun.dispersion.movement, gun.rotationSpeed);
+		if (guntheta > 0.5 * (turret.yawLimits.left + turret.yawLimits.right))
 			gunrotate = 0;
-		double tankrotate = (x - gunrotate * tank.gun.dispersion.movement) / tank.chassis.movementDispersion;
+		double tankrotate = (x - gunrotate * gun.dispersion.movement) / chassis.rotation.dispersion;
 		guntheta += gunrotate * 0.01;
 		theta += (gunrotate + tankrotate) * 0.01;
 	}
-	return timeAtAngle;
+	double timeAtSpeed = gun.aimTime * 0.5 * log(1.0 + speed * chassis.movementDispersion * (speed * chassis.movementDispersion));
+	return timeAtAngle + timeAtSpeed;
 }
 
 double getArmor(double tier) {
@@ -71,82 +69,134 @@ double getHP(double tier) {
 	return (80.0 - (4.0 - 2.0*x)*x)*x;
 }
 
-double getExpectedDamage(std::function<double(double)> fn, double armor) {
-	double x = .2 * exp(-25.0);
-	double dmg = fn(0) * x;
-	for (double i = 1; i < 75.0; i++) {
-		x *= 25.0 / i;
-		dmg += fn(i) * x;
-	}
-	x = .8 * exp(-armor);
-	dmg += x * fn(0);
-	for (double i = 1, e = 3.0 * armor; i < e; i++) {
-		x *= armor / i;
-		dmg += fn(i) * x;
-	}
-	return dmg;
+double getMMTier(Tank& tank) {
+	auto tier = tank.hull.tier;
+	if (tank.hull.tags.find("scout") != string::npos)
+		tier += 1.5;
+	if (tank.hull.name == "M24_Chaffee") tier += 0.5;
+	return tier;
 }
 
-std::function<double(double)> APRound(double tier, double pen, double damage) {
-	return [tier, pen, damage](double x) -> double {
-		x *= 1.4 / pen;
-		double dmg = std::min(1.0, getHP(tier) / damage);
-		if (x < 0.75) return 1.0;
-		if (x > 1.25) return 0.0;
-		return 2.5 - x - x;
-	};
-}
-
-std::function<double(double)> HERound(double tier, double pen, double damage) {
-	return [tier, pen, damage](double x) -> double {
-		x *= 1.4 / pen;
-		double hit = 0;
-		if (x < 0.75) hit = 1.0;
-		else if (x > 1.25) hit = 0.0;
-		else hit = 2.5 - x - x;
-		double dmg = std::max(0.5 - 1.1 * x / (1.4 / pen * damage), 0.0);
-		return hit * std::min(1.0, getHP(tier) / damage) + (1.0 - hit) * dmg;
-	};
-}
-
-double getExpectedDamage(const Tank& tank, const Shell& shell) {
-	if (shell.kind == Shell::HE)
-		return getExpectedDamage(HERound(tank.hull.tier, shell.penAt350m, shell.damage), getArmor(tank.hull.tier));
-	return getExpectedDamage(APRound(tank.hull.tier, shell.penAt350m, shell.damage), getArmor(tank.hull.tier));
-}
-
-#if 0
-double getExpectedDamage(const Tank& tank, const Shell& ap, const Shell& he) {
-	return getExpectedDamage([&](double x){return
-		std::max(APRound(tank.hull.tier, ap.penAt350m, ap.damage),
-		         HERound(tank.hull.tier, he.penAt350m, he.damage));}, getArmor(tank.hull.tier));
-}
-#endif
-
-double getEffectiveReloadRate(const Gun& gun) {
-	return ((gun.magazine.size - 1) * gun.magazine.delay + gun.reloadTime) / gun.magazine.size;
-}
-
-double getEffectiveNumShots(const Gun& gun) {
-	double shots = 0;
-	for (double t = 0.0; t < 60; t += gun.reloadTime - gun.magazine.delay)
-		for (int i = 0; i < (int)gun.magazine.size; t += gun.magazine.delay, i++)
-			shots += lodgistics(3.0 * (t - 2)) * 0.6 + lodgistics(.25 * (t - 15)) * 0.4;
-	return shots;
-}
-
-double getChanceToHit(const Gun& gun, const Shell& shell) {
-	double scope = gun.dispersion.base;
+double getExpectedDamage(Tank& tank, const Shell& shell, double scope, double armor, double range) {
+	auto maxDamage = getHP(getMMTier(tank));
 	if (shell.kind == Shell::HE || shell.kind == Shell::HEAT)
-		scope *= 1.25;
-	double time = 350.0 / shell.speed;
-	return lodgistics(4 * (0.5 - 0.12 / (scope * scope))) * lodgistics(5 * time - 5) * .6 + .4;
+		scope *= 1.2;
+	double time = range / shell.speed;
+	double hitChance = lodgistics(4.0 * (0.4 - 25.0 / (range * scope * scope))) * lodgistics(5.0 * time - 5.0) * 0.6 + 0.4;
+	double pen = 0;
+	if (range <= shell.maxRange)
+		pen = std::max(range - 100.0, 0.0) * (1.0 / 250.0) * (shell.penAt350m - shell.penAt100m) + shell.penAt100m;
+	double penChance = std::min(1.0, std::max(0.0, 2.5 - armor * (2.0 * 1.4) / pen));
+	double damage = penChance * std::min(maxDamage, shell.damage);
+	if (shell.kind == Shell::HE)
+		damage += (1.0 - penChance) * std::min(1.0, std::max(0.0, 2.5 - armor * (1.1 * 2.0 / 0.5) / shell.damage)) * std::min(maxDamage, shell.damage * 0.5 - armor * 1.1);
+	return damage * hitChance;
 }
 
-double getExpectedDamageOnTargetInTime(const Tank& tank, const Gun& gun, const Shell& shell) {
-	return shell.damage * getExpectedDamage(tank, shell) * getEffectiveNumShots(gun) * getChanceToHit(gun, shell);
+double getExpectedDamage(Tank& tank, double scope, double armor, double range) {
+	double damage[] = {0.0, 0.0, 0.0};
+	double efficiency[] = {0.0, 0.0, 0.0};
+	double max = 0.0;
+	size_t best = 0;
+	for (size_t i = 0; i < 3; i++) {
+		auto& shell = tank.shells[i];
+		if (!shell.kind)
+			continue;
+		damage[i] = getExpectedDamage(tank, shell, scope, armor, range);
+		double sunkCost = (tank.hull.health + tank.turret.health) * tank.hull.repairCost * damage[i] / getHP(tank.hull.tier) * 0.3;
+		efficiency[i] = damage[i] * damage[i] / (shell.price + sunkCost);
+		if (efficiency[i] > max) {
+			max = efficiency[i];
+			best = i;
+		}
+	}
+	return damage[best];
 }
 
+double getExpectedDamage(Tank& tank, double scope, double armor) {
+	double mean = 30.0; // range
+	double w = exp(-mean);
+	double x = w * getExpectedDamage(tank, scope, armor, 0.0);
+	for (int i = 1; i < 48; i++) {
+		w *= mean / i;
+		x += getExpectedDamage(tank, scope, armor, i * (200.0 / 30.0)) * w;
+	}
+	return x;
+}
+
+double getExpectedDamage(Tank& tank, double scope) {
+	double mean = 10.0;
+	double w = 0.2 * exp(-mean);
+	double x = w * getExpectedDamage(tank, scope, 0.0);
+	for (double i = 1; i < mean || w > 0.001; i++) {
+		w *= mean / i;
+		x += getExpectedDamage(tank, scope, i * 2.0) * w;
+	}
+	double armor = getArmor(tank.hull.tier) / 30.0;
+	mean = 30.0;
+	w = 0.8 * exp(-mean);
+	for (int i = 1; i < 48; i++) {
+		w *= mean / i;
+		x += getExpectedDamage(tank, scope, i * armor) * w;
+	}
+	return x;
+}
+
+double getTargetIsValid(double t) {
+	return lodgistics(2.0 * (t - 3.0)) * 0.6 + lodgistics(.25 * (t - 15)) * 0.4;
+}
+
+double getExpectedDamage(Tank& tank) {
+	const Gun& gun = tank.gun;
+	double shotDispersion = sqrt(1.0 + gun.dispersion.shot * gun.dispersion.shot);
+	double reaimTime = gun.aimTime * log(shotDispersion);
+	shotDispersion *= gun.dispersion.base;
+	double t = 0.0;
+	double scale = 1.0 / getTargetIsValid(t);
+	double damage = getExpectedDamage(tank, gun.dispersion.base);
+	bool notEnoughAimTime = false;
+	for (int i = 0; scale * getTargetIsValid(t) > 0.001; i++) {
+		double delta = ((i + 1) % (int)gun.magazine.size ? gun.magazine.delay : gun.reloadTime);
+		double scope = std::max(gun.dispersion.base, shotDispersion * exp(-delta / gun.aimTime));
+		double temp = scale * getTargetIsValid(t + delta) * getExpectedDamage(tank, scope);
+		if (reaimTime > delta && (!((i + 1) % (int)gun.magazine.size) || gun.magazine.burst == 1.0)) {
+			double scope = std::max(gun.dispersion.base, shotDispersion * exp(-reaimTime / gun.aimTime));
+			double temp2 = scale * getTargetIsValid(t + delta) * getExpectedDamage(tank, scope);
+			if (temp2 > temp) {
+				delta = reaimTime;
+				temp = temp2;
+				notEnoughAimTime = true;
+			}
+		}
+		t += delta;
+		damage += temp;
+	}
+	if (notEnoughAimTime)
+		tank.notes += " NOT_ENOUGH_AIM_TIME";
+	return damage;
+}
+
+double getAgility(Tank& tank) {
+	double mass = (tank.hull.weight +
+		tank.chassis.weight +
+		tank.fuelTank.weight +
+		tank.turret.weight +
+		tank.gun.weight +
+		tank.engine.weight +
+		tank.radio.weight);
+	double powerToWeight = tank.engine.power / mass;
+	double speed = tank.chassis.speedLimits.forward + tank.chassis.speedLimits.backward * 2.4 + tank.chassis.rotation.speed * powerToWeight / tank.stockPowerToWeight;
+	double acceleration = powerToWeight * pow(tank.chassis.terrainResistance.hard * 0.2 + tank.chassis.terrainResistance.medium * 0.7 + tank.chassis.terrainResistance.soft * 0.1, -1.2);
+	return speed * acceleration;
+	//return pow(pow(, 0.412) *
+	//       pow(, 0.588) - 0.16, 0.58);
+}
+
+double getGunHandlingNormalized(Tank& tank) {
+	return 0;
+	//double x = getGunHandling(tank, 20, 20) * 0.3 + getGunHandling(tank, 20, 100) * 0.7;
+	//return pow(2.0 / x - 0.15, 0.97);
+}
 
 struct XShell : Shell {
 	double utility;
@@ -164,204 +214,6 @@ struct XChassis : Chassis {
 	double effectiveRotationSpeed;
 };
 
-
-#if 0
-
-namespace {
-
-double getPenetration(double tier) {
-	auto x = min(10.0, max(.5, tier));
-	return (23.0 - (3.0 - 0.47*x)*x)*x;
-}
-
-double getArmorThickness(double tier) {
-	return getPenetration(tier - 0.8);
-}
-
-double getPenetration(const Shell& shell, double range) {
-	auto x = min(shell.maxRange - 100, max(0.0, range - 100));
-	return shell.penAt100m + (shell.penAt350m - shell.penAt100m) * x / 250;
-}
-
-struct XTank : Tank {
-	XTank(const Tank& tank, Target target);
-	struct XShell : Shell {
-		XShell() {}
-		XShell(const Shell& shell, Target target, const Tank& tank);
-		double getEffectiveDamage(const Shell& shell, Target target);
-		XShell& operator +=(const XShell& x);
-		XShell& operator *=(double x);
-		double effPenetration, effDamage, utility, accuracy;
-	} xshells[3];
-	struct XGun : Gun {
-		XGun() {}
-		XGun(const Gun& gun, Target target);
-		XGun& operator +=(const XGun& x);
-		XGun& operator *=(double x);
-		double effReloadTime, effShots, utility;
-	} xgun;
-	XTank& operator +=(const XTank& x);
-	XTank& operator *=(double x);
-	double effDPM, effDamage, effBurstDamage, premiumUtility, timeAtAngle;
-};
-
-XTank::XShell::XShell(const Shell& shell, Target target, const Tank& tank) : Shell(shell) {
-	accuracy = lodgistics(4 * target.range / speed - 4) * .6 + .4;
-	effPenetration = getPenetration(shell, target.range);
-	double x = lodgistics(10 * (target.armorThickness - effPenetration) / effPenetration);
-	effDamage = x * accuracy * min(target.hp, shell.damage);
-	if (shell.kind == Shell::HE)
-		effDamage += (1 - x) * accuracy * min(target.hp, max(0.0, shell.damage * 0.5 - 0.7 * target.armorThickness));
-	double costRatio = effDamage * effDamage * effDamage / max(price, min(shell.damage, tank.hull.health + tank.turret.health) * tank.hull.repairCost * 0.25);
-	utility = costRatio * costRatio;
-}
-
-XTank::XShell& XTank::XShell::operator +=(const XShell& x) {
-	effPenetration += x.effPenetration;
-	effDamage += x.effDamage;
-	utility += x.utility;
-	accuracy += x.accuracy;
-	return *this;
-}
-
-XTank::XShell& XTank::XShell::operator *=(double x) {
-	effPenetration *= x;
-	effDamage *= x;
-	utility *= x;
-	accuracy *= x;
-	return *this;
-}
-
-XTank::XGun::XGun(const Gun& gun, Target target) : Gun(gun) {
-	effReloadTime = ((magazine.size - 1) * magazine.delay + reloadTime) / magazine.size;
-	effShots = 0;
-	for (double t = 0.0; t < target.time; t += reloadTime - magazine.delay)
-		for (int i = 0; i < (int)magazine.size; t += magazine.delay, i++)
-			effShots += lodgistics(t - target.time);
-}
-
-XTank::XGun& XTank::XGun::operator +=(const XGun& x) {
-	utility += x.utility;
-	return *this;
-}
-
-XTank::XGun& XTank::XGun::operator *=(double x) {
-	utility *= x;
-	return *this;
-}
-
-XTank::XTank(const Tank& tank, Target target) : Tank(tank), xgun(tank.gun, target) {
-	for (auto i = 0; i < 3; i++)
-		if (shells[i].kind)
-			xshells[i] = XShell(shells[i], target, tank);
-	double totalUtility = 0;
-	for (auto i = 0; i < 3; i++)
-		if (shells[i].kind)
-			totalUtility += xshells[i].utility;
-	for (auto i = 0; i < 3; i++)
-		if (shells[i].kind)
-			xshells[i].utility /= totalUtility;
-	effDPM = 0;
-	for (auto i = 0; i < 3; i++)
-		if (shells[i].kind)
-			effDPM += 60.0 * xshells[i].effDamage / xgun.effReloadTime * xshells[i].utility;
-	effDamage = 0;
-	for (auto i = 0; i < 3; i++)
-		if (shells[i].kind)
-			effDamage += xshells[i].effDamage * xshells[i].utility;
-	effBurstDamage = effDamage * xgun.effShots;
-	premiumUtility = 0;
-	for (auto i = 0; i < 3; i++)
-		if (shells[i].kind && shells[i].isPremium)
-			premiumUtility += xshells[i].utility;
-	timeAtAngle = 0;
-	for (double theta = 0, guntheta = 0; theta < target.angle; timeAtAngle += 0.01) {
-		double x = exp(2 * timeAtAngle / tank.gun.aimTime) - 1;
-		double gunrotate = min(x * .5 / tank.gun.dispersion.movement, tank.gun.rotationSpeed);
-		if (2 * guntheta > turret.yawLimits.left + turret.yawLimits.right)
-			gunrotate = 0;
-		double tankrotate = (x - gunrotate * tank.gun.dispersion.movement) / tank.chassis.movementDispersion;
-		guntheta += gunrotate * 0.01;
-		theta += (gunrotate + tankrotate) * 0.01;
-	}
-}
-
-XTank& XTank::operator +=(const XTank& x) {
-	for (int i = 0; i < 3; i++)
-		if (xshells[i].kind)
-			xshells[i] += x.xshells[i];
-	xgun += x.xgun;
-	effDPM += x.effDPM;
-	effDamage += x.effDamage;
-	effBurstDamage += x.effBurstDamage;
-	premiumUtility += x.premiumUtility;
-	timeAtAngle += x.timeAtAngle;
-	return *this;
-}
-
-XTank& XTank::operator *=(double x) {
-	for (int i = 0; i < 3; i++)
-		if (xshells[i].kind)
-			xshells[i] *= x;
-	xgun *= x;
-	effDPM *= x;
-	effDamage *= x;
-	effBurstDamage *= x;
-	premiumUtility *= x;
-	timeAtAngle *= x;
-	return *this;
-}
-
-XTank Evaluate(const Tank& tank, double range, double time, double angle) {
-	double flankingBonus = 0;
-	Target target[] = {
-		{ 0.05, range, time, angle, getHP(tank.hull.tier / 2), getArmorThickness(tank.hull.tier - flankingBonus - 8) }, // arty
-		{ 0.06, range, time, angle, getHP(tank.hull.tier - 2), getArmorThickness(tank.hull.tier - flankingBonus - 4) }, // scouts
-		{ 0.09, range, time, angle, getHP(tank.hull.tier - 2), getArmorThickness(tank.hull.tier - flankingBonus - 2) },
-		{ 0.20, range, time, angle, getHP(tank.hull.tier - 1), getArmorThickness(tank.hull.tier - flankingBonus - 1) },
-		{ 0.30, range, time, angle, getHP(tank.hull.tier    ), getArmorThickness(tank.hull.tier - flankingBonus    ) },
-		{ 0.20, range, time, angle, getHP(tank.hull.tier + 1), getArmorThickness(tank.hull.tier - flankingBonus + 1) },
-		{ 0.10, range, time, angle, getHP(tank.hull.tier + 2), getArmorThickness(tank.hull.tier - flankingBonus + 2) },
-	};
-	if (tank.hull.tier == 1) {
-		target[0].probability = target[1].probability = target[2].probability = target[3].probability = target[6].probability = 0;
-		target[4].probability = .75;
-		target[5].probability = .25;
-	} else if (tank.hull.tier == 2) {
-		target[1].probability = target[2].probability = target[6].probability = 0;
-		target[3].probability = .20;
-		target[4].probability = .5;
-		target[5].probability = .25;
-	} else if (tank.hull.tier == 3) {
-		target[1].probability = target[2].probability = 0;
-		target[5].probability = .25;
-		target[6].probability = .15;
-	} else if (tank.hull.tier == 4) {
-		target[1].probability = target[2].probability = 0;
-		target[4].probability = .35;
-		target[5].probability = .25;
-	} else if (tank.hull.tier == 9) {
-		target[4].probability = .35;
-		target[5].probability = .25;
-		target[6].probability = 0;
-	} else if (tank.hull.tier == 10) {
-		target[3].probability = .30;
-		target[4].probability = .45;
-		target[5].probability = .05;
-		target[6].probability = 0;
-	}
-	XTank xtank(tank, target[0]);
-	xtank *= target[0].probability;
-	for (int i = 1; i < 7; i++) {
-		XTank x(tank, target[i]);
-		x *= target[i].probability;
-		xtank += x;
-	}
-	return xtank;
-}
-} // nameapce
-#endif
-
 void PrintSkills(char tanker) {
 	if (tanker & COMMANDER) printf("commander");
 	if (tanker & GUNNER) printf("gunner");
@@ -373,7 +225,164 @@ void PrintSkills(char tanker) {
 	if (tanker & ALSO_LOADER) printf(", loader");
 }
 
+Tank applySkillsAndEquipment(const Tank& in, const string& equipment) {
+	Tank tank = in;
+	
+	int gunners = 0;
+	int loaders = 0;
+	int commanderGunner = 0;
+	int commanderLoader = 0;
+	for (int i = 0; i < 8; i++) {
+		if (tank.crew[i] & (GUNNER | ALSO_GUNNER)) {
+			gunners++;
+			if (tank.crew[i] & COMMANDER)
+				commanderGunner = 1;
+		}
+		if (tank.crew[i] & (LOADER | ALSO_LOADER)) {
+			loaders++;
+			if (tank.crew[i] & COMMANDER)
+				commanderLoader = 1;
+		}
+	}
+	if (commanderGunner) tank.notes += " COMMANDER_IS_GUNNER";
+	if (commanderLoader) tank.notes += " COMMANDER_IS_LOADER";
+	double commanderSkill = 100.0;
+
+	if (equipment.find("antifragmentationLining_light") != string::npos)
+		tank.hull.weight += 250.0;
+	if (equipment.find("antifragmentationLining") != string::npos)
+		tank.hull.weight += 500.0;
+	if (equipment.find("antifragmentationLining_heavy") != string::npos)
+		tank.hull.weight += 1000.0;
+	if (equipment.find("antifragmentationLining_superheavy") != string::npos)
+		tank.hull.weight += 1500.0;
+	if (equipment.find("mediumCaliberTankRammer") != string::npos) {
+		tank.gun.reloadTime *= 0.9;
+		tank.hull.weight += 200.0;
+	}
+	if (equipment.find("largeCaliberTankRammer") != string::npos) {
+		tank.gun.reloadTime *= 0.9;
+		tank.hull.weight += 400.0;
+	}
+	if (equipment.find("mediumCaliberHowitzerRammer") != string::npos) {
+		tank.gun.reloadTime *= 0.9;
+		tank.hull.weight += 300.0;
+	}
+	if (equipment.find("largeCaliberHowitzerRammer") != string::npos) {
+		tank.gun.reloadTime *= 0.9;
+		tank.hull.weight += 500.0;
+	}
+	if (equipment.find("enhancedAimDrives") != string::npos) {
+		tank.gun.aimTime *= 0.91;
+		tank.hull.weight += 100.0;
+	}
+	if (equipment.find("aimingStabilizer_Mk1") != string::npos) {
+		tank.gun.dispersion.shot *= 0.8;
+		tank.gun.dispersion.movement *= 0.8;
+		tank.chassis.movementDispersion *= 0.8;
+		tank.hull.weight += 100.0;
+	}
+	if (equipment.find("aimingStabilizer_Mk2") != string::npos) {
+		tank.gun.dispersion.shot *= 0.8;
+		tank.gun.dispersion.movement *= 0.8;
+		tank.chassis.movementDispersion *= 0.8;
+		tank.hull.weight += 200.0;
+	}
+	if (equipment.find("grousers") != string::npos) {
+		tank.chassis.terrainResistance.soft *= 0.909;
+		tank.chassis.terrainResistance.medium *= 0.952;
+		tank.chassis.weight += 1000.0;
+	}
+	if (equipment.find("improvedVentilation_class1") != string::npos) {
+		commanderSkill += 5.0;
+		tank.hull.weight += 100.0;
+	}
+	if (equipment.find("improvedVentilation_class2") != string::npos) {
+		commanderSkill += 5.0;
+		tank.hull.weight += 150.0;
+	}
+	if (equipment.find("improvedVentilation_class6") != string::npos) {
+		commanderSkill += 5.0;
+		tank.hull.weight += 200.0;
+	}
+	if (equipment.find("carbonDioxide") != string::npos) {
+		tank.fuelTank.health *= 1.5;
+	}
+	if (equipment.find("filterCyclone") != string::npos) {
+		tank.engine.health *= 1.5;
+	}
+	if (equipment.find("wetCombatPack_class") != string::npos) {
+		tank.ammoBay.health *= 1.5;
+		tank.hull.weight += 0.01 * (tank.hull.weight + tank.chassis.weight + tank.fuelTank.weight +
+			tank.turret.weight + tank.turret.weight + tank.engine.weight + tank.radio.weight);
+	}
+
+	if (equipment.find("lendLeaseOil") != string::npos || equipment.find("qualityOil") != string::npos)
+		tank.engine.power *= 1.05;
+	if (equipment.find("gasoline100") != string::npos) {
+		tank.engine.power *= 1.05;
+		tank.turret.rotationSpeed *= 1.05;
+	}
+	if (equipment.find("gasoline105") != string::npos) {
+		tank.engine.power *= 1.1;
+		tank.turret.rotationSpeed *= 1.1;
+	}
+	if (equipment.find("chocolate") != string::npos ||
+		equipment.find("cocacola") != string::npos ||
+		equipment.find("ration") != string::npos ||
+		equipment.find("hotCoffee") != string::npos)
+		commanderSkill += 10.0;
+
+	double gunnerSkill = commanderSkill + commanderSkill * 0.1 * (gunners - commanderGunner) / gunners;
+	double loaderSkill = commanderSkill + commanderSkill * 0.1 * (loaders - commanderLoader) / loaders;
+	double driverSkill = commanderSkill * 1.1;
+
+	tank.gun.aimTime *= 0.875 / (0.5 + 0.00375 * gunnerSkill);
+	tank.gun.dispersion.base *= 0.875 / (0.5 + 0.00375 * gunnerSkill);
+	tank.gun.reloadTime *= 0.875 / (0.5 + 0.00375 * loaderSkill);
+	tank.chassis.terrainResistance.hard *= 0.875 / (0.5 + 0.00375 * driverSkill);
+	tank.chassis.terrainResistance.medium *= 0.875 / (0.5 + 0.00375 * driverSkill);
+	tank.chassis.terrainResistance.soft *= 0.875 / (0.5 + 0.00375 * driverSkill);
+
+	return tank;
+}
+
+double normalizeExpectedDamage(double damage, double tier) {
+	return pow((damage * pow(tier + 4, -1.6) - 0.45) / 14.5, 0.8);
+}
+
+double normalizeGunHandling(double handling) {
+	return pow((pow(handling, -0.85) - 0.07) / 0.386, 0.88);
+}
+
+double normalizeAgility(double agility) {
+	return pow((agility - 0.18) / 6.63, 0.44);
+}
+
 void ProcessTanks(const Tank* tanks, size_t size) {
+	struct Stats { double damage, handling, agility, health; };
+	map<string, Stats> statsMap;
+	auto fin = fopen("in.txt", "rb");
+	while (!feof(fin)) {
+		char name[64];
+		float a[4];
+		fscanf(fin, "%s %f %f %f %f", name, &a[0], &a[1], &a[2], &a[3]);
+		Stats s = { a[0], a[1], a[2], a[3] };
+		statsMap[name] = s;
+	}
+
+#if 0
+	for (auto i = 0; i < size; i++)
+		if (tanks[i].hull.name.find("Waffentrager_IV") != string::npos) {
+		//if (tanks[i].hull.name.find("T-28") != string::npos) {
+			auto& gun = tanks[i].gun;
+			auto reAimTime = getReAimTime(gun);
+		//if (tanks[i].hull.name.find("Vickers") != string::npos || tanks[i].hull.name.find("Car") != string::npos)
+			printf("%26s : %f\n", tanks[i].gun.name.c_str(), getExpectedDamageOnTargetInTime(tanks[i], gun, tanks[i].shells[0]));
+			//printf("%26s : %f : %f : %f, %f\n", tanks[i].hull.name.c_str(), gun.reloadTime, reAimTime, sqrt(17.0)*exp(-gun.reloadTime/gun.aimTime), exp((reAimTime - gun.reloadTime)/gun.aimTime));
+		}
+	//return;
+#endif
 
 	struct Entry {
 		bool operator <(const Entry& x) const {
@@ -387,19 +396,33 @@ void ProcessTanks(const Tank* tanks, size_t size) {
 
 	vector<Entry> entires;
 	for (size_t i = 0; i < size; i++) {
-		auto& tank = tanks[i];
-		auto& gun = tank.gun;
-		auto& shell = tank.shells[0];
-		if (!shell.kind)
-			continue;
-		Entry x = { tank, -getExpectedDamageOnTargetInTime(tank, gun, shell) / pow(getHP(tank.hull.tier), .5) * 10 };
+		auto tank = applySkillsAndEquipment(tanks[i], "");
+		//Entry x = { tank, getExpectedDamage(tank) * pow(tank.hull.tier + 4.0, -1.8) };
+		//Entry x = { tank, getManeuverability(tank) };
+		//Entry x = { tank, getGunHandling(tank, 10, 100) };
+		//Entry x = { tank, pow((statsMap[tank.hull.name + tank.gun.name].agility - 0.18) / 6.63, 0.44) };
+		//Entry x = { tank, (int)(1 + 10 * normalizeAgility(statsMap[tank.hull.name + tank.gun.name].agility)) };
+		Entry x = { tank, (int)(1 + 10 * normalizeGunHandling(statsMap[tank.hull.name + tank.gun.name].handling)) };
+		//Entry x = { tank, (int)(1 + 10 * normalizeExpectedDamage(statsMap[tank.hull.name + tank.gun.name].damage, tank.hull.tier)) };
+		//Entry x = { tank, normalizeAgility(statsMap[tank.hull.name + tank.gun.name].agility) +
+		//normalizeGunHandling(statsMap[tank.hull.name + tank.gun.name].handling) +
+		//3 * normalizeExpectedDamage(statsMap[tank.hull.name + tank.gun.name].damage, tank.hull.tier) };
+		//printf("%7.2f : %s\n", x.key, x.tank.hull.name.c_str());
 		entires.push_back(x);
 	}
 	std::sort(entires.begin(), entires.end());
-	int j = 0;
 	auto f = fopen("out.txt", "wb");
-	for (auto i = entires.begin(), e = entires.end(); i != e && ++j < 5000; ++i)
-		fprintf(f, "%4.0f : %5.1f-%-5.1f : %2d : %-14s : %s\n", -i->key, i->tank.shells[0].penAt100m, i->tank.shells[0].penAt350m, (int)i->tank.hull.tier, i->tank.hull.name.c_str(), i->tank.gun.name.c_str());
+	for (auto i = entires.begin(), e = entires.end(); i != e; ++i)
+		//fprintf(f, "%5.3f %s%s\n", i->key, i->tank.hull.name.c_str(), i->tank.gun.name.c_str());
+		fprintf(f, "%2d %2d %2d %s : %s\n",
+			(int)(1 + 10 * normalizeExpectedDamage(statsMap[i->tank.hull.name + i->tank.gun.name].damage, i->tank.hull.tier)),
+			(int)(1 + 10 * normalizeGunHandling(statsMap[i->tank.hull.name + i->tank.gun.name].handling)),
+			(int)(1 + 10 * normalizeAgility(statsMap[i->tank.hull.name + i->tank.gun.name].agility)),
+			i->tank.hull.name.c_str(), i->tank.gun.name.c_str());
+		//fprintf(f, "%5.3f : %2d : %25s : %s\n", i->key, (int)i->tank.hull.tier, i->tank.hull.name.c_str(), i->tank.gun.name.c_str());
+		//fprintf(f, "%5.3f : %s\n", (double)(int)(10 * i->key + 0.5), i->tank.hull.name.c_str());
+		//fprintf(f, "%4.0f : %5.1f-%-5.1f : %2d : %-14s : %s\n", -i->key, i->tank.shells[0].penAt100m, i->tank.shells[0].penAt350m, (int)i->tank.hull.tier, i->tank.hull.name.c_str(), i->tank.gun.name.c_str());
+
 	return;
 
 #if 0

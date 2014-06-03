@@ -856,11 +856,6 @@ struct TankElement : Element {
 		Case(engines, "engines") ||
 		Case(fuelTanks, "fuelTanks") ||
 		Case(radios, "radios") ||
-		Ignore("chassis") ||
-		Ignore("turrets0") ||
-		Ignore("engines") ||
-		Ignore("fuelTanks") ||
-		Ignore("radios") ||
 		Fail();
 	}
 
@@ -1113,7 +1108,7 @@ void TankInit(Tank& o, const TankElement& h, const TurretElement& t, const GunEl
 	o.gun.aimTime = g.aimingTime;
 	o.gun.magazine.size = g.clip.count ? g.clip.count : 1;
 	o.gun.magazine.burst = g.burst.count ? g.burst.count : 1;
-	o.gun.magazine.delay = g.burst.rate ? 60.0 / g.burst.rate : 0;
+	o.gun.magazine.delay = g.clip.rate ? 60.0 / g.clip.rate : 0;
 	o.gun.dispersion.base = g.shotDispersionRadius;
 	o.gun.dispersion.movement = g.shotDispersionFactors.turretRotation;
 	o.gun.dispersion.shot = g.shotDispersionFactors.afterShot;
@@ -1207,13 +1202,14 @@ int main(int argc, char* argv[]) {
 					h->label == "KV" ||
 					h->label == "Observer" ||
 					h->label == "KV-220_action" ||
+					h->label == "PzIV" ||
 					h->label == "PzV_PzIV_ausf_Alfa" ||
 					h->label == "Karl"))
 					continue;
 				tanks.push_back(Tank());
 				//TankInit(tanks.back(), *h, *t, *g);
 				TankInit(tanks.back(), *h, h->turrets.list.back(), *g);
-				//TankInit(tanks.back(), *h, h->turrets.list.back(), *h->turrets.list.back().guns.list.begin());
+				//TankInit(tanks.back(), *h, h->turrets.list.back(), h->turrets.list.back().guns.list.back());
 			}
 	ProcessTanks(tanks.data(), tanks.size());
 	_getch();
